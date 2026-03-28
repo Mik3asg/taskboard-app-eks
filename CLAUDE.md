@@ -98,9 +98,13 @@ docs/
 - external-dns chart switched from Bitnami → kubernetes-sigs ✅
 - Docker Desktop launched and verified ✅
 - `package-lock.json` generated for frontend and backend ✅ (unblocks Docker builds)
+- LoadBalancer subnet tag bug fixed ✅ — both NGINX and ArgoCD now have external hostnames
+- GitHub Actions IAM roles created (github-actions-terraform, github-actions-cicd) ✅
+- GitHub OIDC provider registered in AWS IAM ✅
+- ArgoCD token generated ✅
+- **Pending:** GitHub Actions secrets not yet configured in repo
 - **Pending:** Docker images not yet pushed to ECR (build ready to run)
 - **Pending:** git push to GitHub (ArgoCD cannot sync taskboard until repo is pushed)
-- **Pending:** GitHub Actions secrets not yet configured
 
 ## Deployment steps log
 
@@ -284,6 +288,99 @@ git commit -m "chore: add package-lock.json for frontend and backend"
 ```
 
 **Prevention:** Always run `npm install` and commit the resulting `package-lock.json` whenever a new `package.json` is created. The Dockerfile should use `npm ci` (not `npm install`) for deterministic, CI-safe dependency installs.
+
+---
+
+### Issue 6 — LoadBalancer services stuck in `<pending>` (EXTERNAL-IP never assigned)
+**Symptom:** Both `ingress-nginx-controller` and `argocd-server` services showed `TYPE: LoadBalancer` but `EXTERNAL-IP: <pending>` indefinitely (5+ hours). Attaching `ElasticLoadBalancingFullAccess` to the node role had no effect.
+
+Checking the service events revealed the exact error:
+```
+kubectl describe svc ingress-nginx-controller -n ingress-nginx | tail -20
+
+Warning  SyncLoadBalancerFailed  service-controller  Error syncing load balancer:
+failed to ensure load balancer: could not find any suitable subnets for creating the ELB
+```
+
+**Root cause:** The EKS Cloud Controller Manager (CCM) looks for subnets tagged with both:
+- `kubernetes.io/role/elb: 1` — marks subnet as eligible for internet-facing load balancers
+- `kubernetes.io/cluster/<cluster-name>: shared` — scopes the subnet to the specific cluster
+
+The VPC module had the correct tags in Terraform, but the `cluster_name` passed to the VPC module in `infrastructure/main.tf` was wrong:
+```hcl
+# Bug — passes "plane-app-eks" (project name only)
+cluster_name = var.project_name
+
+# Correct — must include environment suffix to match actual cluster name "plane-app-eks-prod"
+cluster_name = "${var.project_name}-${var.environment}"
+```
+
+This meant the subnets were tagged `kubernetes.io/cluster/plane-app-eks: shared` instead of `kubernetes.io/cluster/plane-app-eks-prod: shared`. The CCM could not match the subnets to the cluster and refused to provision any ELB.
+
+**Fix — two parts:**
+
+1. Tag the subnets immediately in AWS (no need to re-run Terraform):
+```bash
+aws ec2 create-tags --resources subnet-0e23e1d2780d4ece7 --tags Key=kubernetes.io/cluster/plane-app-eks-prod,Value=shared --region eu-west-2
+aws ec2 create-tags --resources subnet-0cedea7f1c22439de --tags Key=kubernetes.io/cluster/plane-app-eks-prod,Value=shared --region eu-west-2
+aws ec2 create-tags --resources subnet-0f5cdfde400ffbc6f --tags Key=kubernetes.io/cluster/plane-app-eks-prod,Value=shared --region eu-west-2
+```
+
+2. Fix the Terraform code so the tag is correct on future `terraform apply` runs:
+```hcl
+# terraform/infrastructure/main.tf — module "vpc" block
+cluster_name = "${var.project_name}-${var.environment}"
+```
+
+Within ~90 seconds of the tags being applied, the CCM retried and both load balancers provisioned successfully:
+```
+Normal  EnsuredLoadBalancer  service-controller  Ensured load balancer
+```
+
+**Prevention:** Always pass `"${var.project_name}-${var.environment}"` as the `cluster_name` to the VPC module — it must exactly match the EKS cluster name. Verify subnet tags with:
+```bash
+aws ec2 describe-subnets \
+  --subnet-ids <public-subnet-ids> \
+  --query 'Subnets[*].Tags[?starts_with(Key, `kubernetes.io`)]' \
+  --region eu-west-2
+```
+
+### Issue 7 — ArgoCD token generation failed (apiKey capability not enabled)
+**Symptom:** Running `argocd account generate-token --account admin` returned:
+```
+rpc error: code = Unknown desc = failed to update account with new token:
+account 'admin' does not have apiKey capability
+```
+
+**Root cause:** By default the ArgoCD `admin` account only has `login` capability. The `apiKey` capability (required to generate API tokens for CI/CD use) is not enabled unless explicitly configured in the `argocd-cm` ConfigMap.
+
+**Fix:** Patch the `argocd-cm` ConfigMap to add `apiKey` to the admin account's capabilities:
+```bash
+kubectl patch configmap argocd-cm -n argocd \
+  --type merge \
+  -p '{"data": {"accounts.admin": "apiKey, login"}}'
+```
+
+Then regenerate the token:
+```bash
+./argocd.exe account generate-token --account admin
+```
+
+**Prevention:** When installing ArgoCD for use with CI/CD pipelines, patch `argocd-cm` immediately after install to enable `apiKey` capability before attempting token generation.
+
+---
+
+### Issue 8 — argocd CLI not found in Git Bash on Windows
+**Symptom:** `argocd: command not found` in Git Bash. Standard install paths (`/usr/local/bin`, `/usr/bin`) either don't exist or are permission-denied in Git Bash on Windows.
+
+**Fix:** Download the Windows binary directly to the project directory and run it with `./`:
+```bash
+curl -sSL -o argocd.exe https://github.com/argoproj/argo-cd/releases/latest/download/argocd-windows-amd64.exe
+./argocd.exe login localhost:8080 --username admin --password <password> --insecure
+./argocd.exe account generate-token --account admin
+```
+
+**Prevention:** On Windows with Git Bash, always use `./argocd.exe` from a local directory rather than trying to install to system paths.
 
 ## Terraform apply — outputs and what was done with them
 

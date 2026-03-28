@@ -23,3 +23,5 @@ dist/
 Thumbs.db
 .vscode/
 *.swp
+argocd
+argocd.exe

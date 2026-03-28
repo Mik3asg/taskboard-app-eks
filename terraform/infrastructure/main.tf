@@ -6,7 +6,7 @@ module "vpc" {
   project_name = var.project_name
   environment  = var.environment
   vpc_cidr     = var.vpc_cidr
-  cluster_name = var.project_name
+  cluster_name = "${var.project_name}-${var.environment}"
 }
 
 // ─── EKS ──────────────────────────────────────────────────────────────────────
