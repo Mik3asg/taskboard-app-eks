@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: taskboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          # CI pipeline replaces this tag with the ECR image URL + git SHA after build+push
+          image: 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-frontend:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: taskboard
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80

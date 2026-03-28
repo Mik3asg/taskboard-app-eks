@@ -1,0 +1,123 @@
+name: App CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "docker/**"
+      - "kubernetes/app/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # ── Build & push images to ECR ─────────────────────────────────────────────
+  build-push:
+    name: Build, scan, and push images
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Multi-stage build — context is repo root so Dockerfile can reach app/
+      - name: Build frontend image
+        run: |
+          docker build -f docker/Dockerfile.frontend \
+            -t $ECR_REGISTRY/plane-app-eks/plane-frontend:$IMAGE_TAG \
+            -t $ECR_REGISTRY/plane-app-eks/plane-frontend:latest \
+            .
+
+      - name: Build backend image
+        run: |
+          docker build -f docker/Dockerfile.backend \
+            -t $ECR_REGISTRY/plane-app-eks/plane-backend:$IMAGE_TAG \
+            -t $ECR_REGISTRY/plane-app-eks/plane-backend:latest \
+            .
+
+      # Trivy scans images for CVEs before they reach ECR
+      - name: Trivy scan — frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+
+      - name: Trivy scan — backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+
+      - name: Push images to ECR
+        run: |
+          docker push $ECR_REGISTRY/plane-app-eks/plane-frontend:$IMAGE_TAG
+          docker push $ECR_REGISTRY/plane-app-eks/plane-frontend:latest
+          docker push $ECR_REGISTRY/plane-app-eks/plane-backend:$IMAGE_TAG
+          docker push $ECR_REGISTRY/plane-app-eks/plane-backend:latest
+
+  # ── Deploy: update manifests + trigger ArgoCD sync ─────────────────────────
+  deploy:
+    name: Deploy to EKS via ArgoCD
+    runs-on: ubuntu-latest
+    needs: build-push
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Stamp the new ECR image tag into the K8s manifests so ArgoCD sees a diff
+      - name: Update image tags in manifests
+        run: |
+          sed -i "s|REPLACE_WITH_ECR_FRONTEND_URL:latest|$ECR_REGISTRY/plane-app-eks/plane-frontend:$IMAGE_TAG|g" \
+            kubernetes/app/plane-web.yaml
+          sed -i "s|REPLACE_WITH_ECR_BACKEND_URL:latest|$ECR_REGISTRY/plane-app-eks/plane-backend:$IMAGE_TAG|g" \
+            kubernetes/app/plane-api.yaml kubernetes/app/plane-worker.yaml
+
+      - name: Commit updated manifests
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add kubernetes/app/plane-web.yaml kubernetes/app/plane-api.yaml kubernetes/app/plane-worker.yaml
+          git commit -m "ci: update image tags to $IMAGE_TAG [skip ci]"
+          git push
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+      - name: Trigger ArgoCD sync
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          argocd app sync taskboard \
+            --server $ARGOCD_SERVER \
+            --auth-token $ARGOCD_TOKEN \
+            --insecure \
+            --wait

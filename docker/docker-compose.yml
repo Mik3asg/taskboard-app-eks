@@ -1,0 +1,58 @@
+# Local development environment — mirrors the K8s setup
+# Usage: docker compose up --build
+#
+# Services:
+#   frontend  — React + Vite built with nginx (port 3000)
+#   backend   — Node.js + Express API        (port 8000)
+#   postgres  — PostgreSQL 15                (port 5432)
+#   redis     — Redis 7                      (port 6379)
+
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://taskboard:taskboard@postgres:5432/taskboard
+      REDIS_URL: redis://redis:6379
+      PORT: "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       taskboard
+      POSTGRES_USER:     taskboard
+      POSTGRES_PASSWORD: taskboard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

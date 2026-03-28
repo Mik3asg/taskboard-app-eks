@@ -1,0 +1,31 @@
+# DB Migration Job — runs once before the backend starts to ensure the schema exists.
+# Re-apply this Job whenever you add new migrations to src/migrate.js.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: taskboard
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-backend:latest
+          command: ["node", "src/migrate.js"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taskboard-secret
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://taskboard:$(POSTGRES_PASSWORD)@postgres:5432/taskboard"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

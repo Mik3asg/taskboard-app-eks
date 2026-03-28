@@ -1,0 +1,25 @@
+# ── Terraform ─────────────────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+# Keep lock files — they pin provider versions
+!.terraform.lock.hcl
+
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.env
+.env.local
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+# Nothing to ignore — Dockerfiles are committed
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
