@@ -92,9 +92,9 @@ jobs:
       # Stamp the new ECR image tag into the K8s manifests so ArgoCD sees a diff
       - name: Update image tags in manifests
         run: |
-          sed -i "s|REPLACE_WITH_ECR_FRONTEND_URL:latest|$ECR_REGISTRY/plane-app-eks/plane-frontend:$IMAGE_TAG|g" \
+          sed -i "s|plane-app-eks/plane-frontend:[^ ]*|plane-app-eks/plane-frontend:$IMAGE_TAG|g" \
             kubernetes/app/plane-web.yaml
-          sed -i "s|REPLACE_WITH_ECR_BACKEND_URL:latest|$ECR_REGISTRY/plane-app-eks/plane-backend:$IMAGE_TAG|g" \
+          sed -i "s|plane-app-eks/plane-backend:[^ ]*|plane-app-eks/plane-backend:$IMAGE_TAG|g" \
             kubernetes/app/plane-api.yaml kubernetes/app/plane-worker.yaml
 
       - name: Commit updated manifests

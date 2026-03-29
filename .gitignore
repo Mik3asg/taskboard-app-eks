@@ -25,3 +25,6 @@ Thumbs.db
 *.swp
 /argocd
 /argocd.exe
+/ebs-csi-trust.json
+
+# Docker ------------------------------------------------------------------------

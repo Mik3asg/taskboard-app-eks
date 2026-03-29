@@ -217,6 +217,66 @@ resource "aws_eks_node_group" "main" {
   ]
 }
 
+// ─── Locals ───────────────────────────────────────────────────────────────────
+
+locals {
+  oidc_issuer_bare = replace(aws_iam_openid_connect_provider.eks.url, "https://", "")
+}
+
+// ─── EBS CSI Driver ───────────────────────────────────────────────────────────
+
+// IRSA role for the EBS CSI controller — allows it to call EC2 APIs to provision
+// EBS volumes for PersistentVolumeClaims without relying on the node instance profile.
+// Required because IMDSv2 hop limit on managed nodes blocks pod-level IMDS access.
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.project_name}-${var.environment}-ebs-csi"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${local.oidc_issuer_bare}:aud" = "sts.amazonaws.com"
+          "${local.oidc_issuer_bare}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+        }
+      }
+    }]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-ebs-csi"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_policy" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+// Install EBS CSI as a managed EKS addon — not included by default but required
+// for any workload that uses PersistentVolumeClaims (e.g. Prometheus, PostgreSQL)
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = aws_eks_cluster.main.name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ebs_csi.arn
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+
+  depends_on = [aws_eks_node_group.main]
+}
+
 // ─── OIDC Provider (required for IRSA) ───────────────────────────────────────
 
 // Fetch the TLS thumbprint from the EKS OIDC issuer endpoint

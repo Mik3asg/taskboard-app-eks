@@ -102,6 +102,90 @@ module "irsa_cert_manager" {
   })
 }
 
+// ─── GitHub Actions: OIDC + IAM Roles ────────────────────────────────────────
+
+// One-time OIDC provider that lets GitHub Actions assume AWS roles via short-lived
+// tokens — no long-lived AWS access keys stored in GitHub secrets.
+resource "aws_iam_openid_connect_provider" "github" {
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+locals {
+  github_oidc_arn = aws_iam_openid_connect_provider.github.arn
+  github_sub      = "repo:${var.github_repo}:*"
+}
+
+// Terraform pipeline role — broad permissions needed to manage all infra resources
+resource "aws_iam_role" "github_terraform" {
+  name = "github-actions-terraform"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { Federated = local.github_oidc_arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
+        StringLike   = { "token.actions.githubusercontent.com:sub" = local.github_sub }
+      }
+    }]
+  })
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "github_terraform_admin" {
+  role       = aws_iam_role.github_terraform.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+// CI/CD pipeline role — ECR push + EKS describe for image builds and ArgoCD sync
+resource "aws_iam_role" "github_cicd" {
+  name = "github-actions-cicd"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { Federated = local.github_oidc_arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
+        StringLike   = { "token.actions.githubusercontent.com:sub" = local.github_sub }
+      }
+    }]
+  })
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "github_cicd_ecr" {
+  role       = aws_iam_role.github_cicd.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+}
+
+resource "aws_iam_role_policy_attachment" "github_cicd_eks" {
+  role       = aws_iam_role.github_cicd.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
 // ─── ECR Repositories ─────────────────────────────────────────────────────────
 
 // One repo per Plane service. The CI pipeline builds, tags, and pushes images

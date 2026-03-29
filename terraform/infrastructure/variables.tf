@@ -33,3 +33,9 @@ variable "domain_name" {
   type        = string
   default     = "labs.virtualscale.dev"
 }
+
+variable "github_repo" {
+  description = "GitHub repository in org/repo format — used to scope the GitHub Actions OIDC trust policy"
+  type        = string
+  default     = "Mik3asg/plane-app-aws-eks"
+}

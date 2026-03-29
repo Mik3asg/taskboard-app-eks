@@ -67,7 +67,7 @@ docs/
 | 0a | Bootstrap: S3 bucket (versioning, encryption, public access block) | ✅ written |
 | 0b | Bootstrap: S3 native state locking (`use_lockfile = true`, Terraform ≥1.10) | ✅ written |
 | 0c | Bootstrap: provider + version constraints (`terraform >= 1.10`, `aws ~> 5.0`) | ✅ written |
-| 0d | Bootstrap: `terraform apply` to create the state bucket in AWS | ⬜ not applied |
+| 0d | Bootstrap: `terraform apply` to create the state bucket in AWS | ✅ applied |
 | 1a | Infra: VPC module — VPC, 3 public + 3 private subnets, IGW, NAT GW, route tables | ✅ complete |
 | 1b | Infra: `infrastructure/` version.tf — S3 backend + provider config | ✅ complete |
 | 1c | Infra: `infrastructure/` variables.tf — region, project, env, CIDR, EKS version, domain | ✅ complete |
@@ -76,7 +76,7 @@ docs/
 | 1f | Infra: DNS module — Route53 hosted zone for `labs.virtualscale.dev` | ✅ complete |
 | 1g | Infra: Wire EKS, IRSA, DNS into `infrastructure/main.tf` (VPC already wired) | ✅ complete |
 | 1h | Infra: `infrastructure/outputs.tf` — expose cluster endpoint, OIDC, subnet IDs | ✅ complete |
-| 1i | Infra: `terraform apply` to provision EKS cluster in AWS | ⬜ not applied |
+| 1i | Infra: `terraform apply` to provision EKS cluster in AWS | ✅ applied |
 | 2a | K8s add-ons: NGINX Ingress Controller (ArgoCD Application → Helm) | ✅ complete |
 | 2b | K8s add-ons: CertManager + Let's Encrypt ClusterIssuer | ✅ complete |
 | 2c | K8s add-ons: ExternalDNS (Route53) | ✅ complete |
@@ -102,9 +102,13 @@ docs/
 - GitHub Actions IAM roles created (github-actions-terraform, github-actions-cicd) ✅
 - GitHub OIDC provider registered in AWS IAM ✅
 - ArgoCD token generated ✅
-- **Pending:** GitHub Actions secrets not yet configured in repo
-- **Pending:** Docker images not yet pushed to ECR (build ready to run)
-- **Pending:** git push to GitHub (ArgoCD cannot sync taskboard until repo is pushed)
+- GitHub Actions secrets configured in repo ✅
+- Docker images pushed to ECR ✅
+- Code pushed to GitHub ✅
+- All taskboard pods Running ✅ (frontend, backend, postgres, redis, db-migrate Completed)
+- TLS certificate issued by Let's Encrypt ✅
+- DNS record created by ExternalDNS in Route53 ✅
+- **App live at https://eks.labs.virtualscale.dev** ✅
 
 ## Deployment steps log
 
@@ -345,7 +349,60 @@ aws ec2 describe-subnets \
   --region eu-west-2
 ```
 
-### Issue 7 — ArgoCD token generation failed (apiKey capability not enabled)
+### Issue 7 — All pods stuck in Pending: node pod limit reached
+**Symptom:** All taskboard, monitoring, ingress-nginx, and external-dns pods showed `Pending` indefinitely. CPU and memory were not the bottleneck (node was only at 30% CPU / 26% memory). Describing a pending pod revealed:
+```
+Warning  FailedScheduling  default-scheduler
+0/1 nodes are available: 1 Too many pods.
+preemption: 0/1 nodes are available: 1 No preemption victims found for incoming pod.
+```
+
+Cluster state at time of issue:
+- Nodes: 1 × `t3.medium`
+- Pods scheduled on node: 18 (`kubectl get pods -A --field-selector spec.nodeName!="" | wc -l`)
+- Pod limit for t3.medium: 17 (EKS VPC CNI hard limit based on ENI × IPs per ENI)
+
+**Root cause:** EKS uses the AWS VPC CNI plugin which assigns a real VPC IP address to every pod. The number of pods per node is capped by the instance's ENI and IP limits. For `t3.medium`:
+- 3 network interfaces × (6 IPs per interface - 1) + 2 = **17 pods maximum**
+
+With ArgoCD (~8 pods), kube-system (~6 pods), cert-manager, and other add-ons already running, the node was full before the taskboard and monitoring workloads could be scheduled.
+
+**Fix options (choose one):**
+
+**Option A — Scale to 2 nodes (simplest, ~$1/day extra cost):**
+```bash
+aws eks update-nodegroup-config \
+  --cluster-name plane-app-eks-prod \
+  --nodegroup-name plane-app-eks-prod-nodes \
+  --scaling-config minSize=1,maxSize=2,desiredSize=2 \
+  --region eu-west-2
+```
+Scale back to 1 after testing to reduce cost:
+```bash
+aws eks update-nodegroup-config \
+  --cluster-name plane-app-eks-prod \
+  --nodegroup-name plane-app-eks-prod-nodes \
+  --scaling-config minSize=1,maxSize=2,desiredSize=1 \
+  --region eu-west-2
+```
+
+**Option B — Enable prefix delegation on VPC CNI (free, increases pod limit to 110):**
+Prefix delegation assigns /28 IPv4 prefixes to ENIs instead of individual IPs, dramatically increasing the pod limit without adding nodes:
+```bash
+kubectl set env daemonset aws-node -n kube-system \
+  ENABLE_PREFIX_DELEGATION=true \
+  WARM_PREFIX_TARGET=1
+```
+Then restart the node for the new limit to take effect.
+
+**Option C — Use a larger instance type (higher cost):**
+Larger instances have more ENIs and IPs. `t3.large` supports 35 pods, `t3.xlarge` supports 58 pods. Requires recreating the node group in Terraform.
+
+**Prevention:** When planning EKS clusters with many add-ons (ArgoCD, cert-manager, ingress-nginx, monitoring, external-dns), account for system pod overhead. With a full add-on stack, a single `t3.medium` can be exhausted before any application pods are scheduled. Use Option B (prefix delegation) or size for at least 2 nodes from the start.
+
+---
+
+### Issue 8 — ArgoCD token generation failed (apiKey capability not enabled)
 **Symptom:** Running `argocd account generate-token --account admin` returned:
 ```
 rpc error: code = Unknown desc = failed to update account with new token:
@@ -370,7 +427,7 @@ Then regenerate the token:
 
 ---
 
-### Issue 8 — argocd CLI not found in Git Bash on Windows
+### Issue 9 — argocd CLI not found in Git Bash on Windows
 **Symptom:** `argocd: command not found` in Git Bash. Standard install paths (`/usr/local/bin`, `/usr/bin`) either don't exist or are permission-denied in Git Bash on Windows.
 
 **Fix:** Download the Windows binary directly to the project directory and run it with `./`:
@@ -381,6 +438,86 @@ curl -sSL -o argocd.exe https://github.com/argoproj/argo-cd/releases/latest/down
 ```
 
 **Prevention:** On Windows with Git Bash, always use `./argocd.exe` from a local directory rather than trying to install to system paths.
+
+---
+
+### Issue 10 — postgres PVC stuck in Pending (no StorageClass)
+**Symptom:** `kubectl get pvc -n taskboard` showed the `postgres-pvc` in `Pending` state indefinitely. Describing the PVC showed no provisioner was triggered.
+
+**Root cause:** The PVC manifest had no `storageClassName` field. Without an explicit storage class, EKS does not automatically provision an EBS volume — the default StorageClass on EKS requires the EBS CSI driver and explicit class reference.
+
+**Fix:** Added `storageClassName: gp2` to the PVC spec in `kubernetes/app/postgres.yaml`:
+```yaml
+spec:
+  storageClassName: gp2
+```
+
+**Prevention:** Always specify `storageClassName: gp2` (or `gp3`) explicitly on PVCs in EKS manifests. Never rely on implicit default StorageClass resolution.
+
+---
+
+### Issue 11 — postgres pod CrashLoopBackOff (EBS volume has lost+found at root)
+**Symptom:** After the postgres PVC was provisioned, the postgres pod went into `CrashLoopBackOff`. Container logs showed PostgreSQL refusing to start because the data directory `/var/lib/postgresql/data` was not empty — it contained a `lost+found` directory created by the EBS volume's ext4 filesystem.
+
+**Root cause:** EBS volumes are formatted with ext4, which creates a `lost+found` directory at the filesystem root. The postgres container mounts the volume directly at its data directory and refuses to initialise if any files already exist there.
+
+**Fix:** Added `subPath: postgres` to the volumeMount in `kubernetes/app/postgres.yaml`:
+```yaml
+volumeMounts:
+  - name: postgres-data
+    mountPath: /var/lib/postgresql/data
+    subPath: postgres      # postgres data goes into a subdirectory, avoiding lost+found
+```
+This causes Kubernetes to mount only the `postgres/` subdirectory of the EBS volume, bypassing `lost+found`.
+
+**Prevention:** Always use `subPath` when mounting EBS-backed PVCs into containers that require an empty directory (databases, etc.).
+
+---
+
+### Issue 12 — IRSA trust policy typo (`serviceaccounts` vs `serviceaccount`)
+**Symptom:** cert-manager pod had IRSA credentials but Route53 calls returned `AccessDenied`. Inspecting the IAM role trust policy showed the `sub` condition contained `system:serviceaccounts:cert-manager:cert-manager` (plural) instead of `system:serviceaccount:cert-manager:cert-manager` (singular).
+
+**Root cause:** Kubernetes OIDC tokens use `system:serviceaccount:<namespace>:<name>` (singular) in the `sub` claim. The IRSA module had a hard-coded `system:serviceaccounts:` prefix (plural), causing the `StringEquals` condition to never match — AWS STS rejected all `AssumeRoleWithWebIdentity` calls.
+
+**Fix:** Corrected the typo in `terraform/modules/irsa/main.tf`:
+```hcl
+# Before (wrong)
+"${local.oidc_issuer_bare}:sub" = "system:serviceaccounts:${var.namespace}:${var.service_account_name}"
+
+# After (correct)
+"${local.oidc_issuer_bare}:sub" = "system:serviceaccount:${var.namespace}:${var.service_account_name}"
+```
+Then ran `terraform apply` to update the trust policies for both the cert-manager and external-dns roles.
+
+**Prevention:** The correct singular form is `system:serviceaccount:` — verify this in any IRSA trust policy. After applying Terraform, always check the generated trust policy in the IAM console before testing.
+
+---
+
+### Issue 13 — Prometheus PVC stuck in Pending (missing StorageClass in Helm values)
+**Symptom:** After fixing the EBS CSI driver, Prometheus remained `Pending`. The PVC `prometheus-kube-prometheus-stack-prometheus-db-...` had no `STORAGECLASS` column in `kubectl get pvc -n monitoring`.
+
+**Root cause:** The kube-prometheus-stack Helm values in `kubernetes/argocd/apps/monitoring.yaml` specified a `volumeClaimTemplate` under `storageSpec` but omitted `storageClassName`. Without it, the StatefulSet PVC template had no storage class and the EBS CSI provisioner was never triggered.
+
+**Fix:** Added `storageClassName: gp2` to the Prometheus `storageSpec` in `monitoring.yaml`:
+```yaml
+storageSpec:
+  volumeClaimTemplate:
+    spec:
+      storageClassName: gp2
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+```
+
+Because `volumeClaimTemplates` on StatefulSets are immutable, the old StatefulSet and PVC had to be deleted before ArgoCD could re-create them with the corrected spec:
+```bash
+kubectl delete statefulset prometheus-kube-prometheus-stack-prometheus -n monitoring
+kubectl delete pvc prometheus-kube-prometheus-stack-prometheus-db-... -n monitoring
+# ArgoCD auto-reconciles and recreates with the correct StorageClass
+```
+
+**Prevention:** Always include `storageClassName: gp2` in any Helm values that define `volumeClaimTemplate`. When updating StatefulSet PVC templates, remember they are immutable — always delete the StatefulSet and PVC before re-applying.
 
 ## Terraform apply — outputs and what was done with them
 

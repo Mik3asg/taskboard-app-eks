@@ -22,7 +22,7 @@ resource "aws_iam_role" "this" {
         StringEquals = {
           // Scope to the exact service account — prevents privilege escalation
           // from other pods in the same namespace
-          "${local.oidc_issuer_bare}:sub" = "system:serviceaccounts:${var.namespace}:${var.service_account_name}"
+          "${local.oidc_issuer_bare}:sub" = "system:serviceaccount:${var.namespace}:${var.service_account_name}"
           // Scope to AWS STS — prevents token reuse against other OIDC relying parties
           "${local.oidc_issuer_bare}:aud" = "sts.amazonaws.com"
         }

@@ -67,6 +67,18 @@ output "cert_manager_role_arn" {
   value       = module.irsa_cert_manager.role_arn
 }
 
+// ─── GitHub Actions ───────────────────────────────────────────────────────────
+
+output "github_terraform_role_arn" {
+  description = "IAM role ARN for GitHub Actions Terraform pipeline — set as AWS_TERRAFORM_ROLE_ARN secret"
+  value       = aws_iam_role.github_terraform.arn
+}
+
+output "github_cicd_role_arn" {
+  description = "IAM role ARN for GitHub Actions CI/CD pipeline — set as AWS_CICD_ROLE_ARN secret"
+  value       = aws_iam_role.github_cicd.arn
+}
+
 // ─── ECR ──────────────────────────────────────────────────────────────────────
 
 output "ecr_frontend_url" {
