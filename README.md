@@ -216,6 +216,20 @@ Copy the outputs and fill in the Kubernetes manifests:
 
 ### Step 2 — Delegate DNS to Route53
 
+**Why two subdomains?**
+
+The app is reachable at `eks.labs.virtualscale.dev`, which follows a deliberate two-level pattern:
+
+```
+virtualscale.dev              → root domain, stays at Cloudflare
+  └── labs.virtualscale.dev       → delegated to Route53 via NS records in Cloudflare
+        └── eks.labs.virtualscale.dev  → A record auto-created by ExternalDNS → NLB
+```
+
+Rather than moving the entire root domain to Route53, only the `labs.` subdomain is delegated. This keeps your root domain and any other records (email, other sites) untouched at Cloudflare, while giving Route53 full ownership of `labs.virtualscale.dev` and everything under it. ExternalDNS and cert-manager can then create and manage records in that zone autonomously — no manual DNS changes needed after the initial delegation.
+
+`labs` acts as an environment namespace — you could add more entries under it (e.g. `dev.labs.`, `staging.labs.`, a second cluster at `eks2.labs.`) all managed automatically.
+
 In your DNS registrar (e.g. Cloudflare), add NS records for your subdomain pointing to the 4 AWS name servers from `terraform output name_servers`:
 
 ```
