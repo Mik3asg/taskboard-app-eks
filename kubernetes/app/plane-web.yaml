@@ -16,7 +16,7 @@ spec:
       containers:
         - name: frontend
           # CI pipeline replaces this tag with the ECR image URL + git SHA after build+push
-          image: 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-frontend:9c06c0f68581a5bd4c304e95ab77ea1ed8a2b2f0
+          image: 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-frontend:06fd47a3ea330908a18ff3ba1766e21312388caf
           ports:
             - containerPort: 80
           resources:
