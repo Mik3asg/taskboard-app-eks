@@ -2,6 +2,12 @@
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "${var.project_name}-terraform-state"
 
+  #checkov:skip=CKV_AWS_144: "Cross-region replication is unnecessary for a self-training state bucket"
+  #checkov:skip=CKV2_AWS_62: "Event notifications are not required for a Terraform state bucket"
+  #checkov:skip=CKV_AWS_18:  "Access logging adds cost and complexity not warranted for a self-training project"
+  #checkov:skip=CKV_AWS_145: "AES256 server-side encryption is sufficient; KMS adds cost and complexity"
+  #checkov:skip=CKV2_AWS_61: "State files do not require a lifecycle expiry policy"
+
   // Prevent accidental deletion of state bucket
   lifecycle {
     prevent_destroy = true
