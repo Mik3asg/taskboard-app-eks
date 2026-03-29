@@ -119,5 +119,9 @@ jobs:
           argocd app sync taskboard \
             --server $ARGOCD_SERVER \
             --auth-token $ARGOCD_TOKEN \
+            --insecure
+          argocd app wait taskboard \
+            --server $ARGOCD_SERVER \
+            --auth-token $ARGOCD_TOKEN \
             --insecure \
-            --wait
+            --timeout 120

@@ -519,6 +519,58 @@ kubectl delete pvc prometheus-kube-prometheus-stack-prometheus-db-... -n monitor
 
 **Prevention:** Always include `storageClassName: gp2` in any Helm values that define `volumeClaimTemplate`. When updating StatefulSet PVC templates, remember they are immutable — always delete the StatefulSet and PVC before re-applying.
 
+---
+
+### Issue 14 — App CI/CD pipeline: Docker build failing ("requires 1 argument")
+**Symptom:** GitHub Actions `docker build` step failed with `docker buildx build requires 1 argument`. The build context path was missing from the command.
+
+**Root cause:** The `ECR_REGISTRY` GitHub secret had a trailing newline embedded in its value. GitHub Actions expands `${{ env.ECR_REGISTRY }}` before the shell sees the command, so the newline was injected literally into the shell — splitting the `-t` flag's argument across two lines and leaving the build context path as a separate, unrecognised argument.
+
+**Fix (two parts):**
+1. Re-saved the `ECR_REGISTRY` secret in GitHub Settings → Secrets, carefully removing the trailing newline before saving.
+2. Quoted all `${{ env.* }}` expansions in the `docker build` commands so any future trailing whitespace is absorbed by the quotes rather than splitting the command:
+```yaml
+run: docker build -f "${{ github.workspace }}/docker/Dockerfile.backend" \
+  -t "${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }}" \
+  "${{ github.workspace }}"
+```
+
+**Prevention:** Always quote `${{ env.VAR }}` expansions in shell `run` steps. When pasting secrets into GitHub Settings → Secrets, explicitly select and delete any trailing newline before saving — there is no visual indicator that one is present.
+
+---
+
+### Issue 15 — App CI/CD pipeline: Trivy scan failing on npm internal CVEs
+**Symptom:** Trivy scan failed with `exit code 1` on the backend image, flagging multiple HIGH CVEs in the `tar` npm package (`CVE-2026-23745`, `CVE-2026-23950`, `CVE-2026-24842`, `CVE-2026-26960`, `CVE-2026-29786`, `CVE-2026-31802`) and one in `cross-spawn`. All app dependencies showed `0` vulnerabilities.
+
+**Root cause:** The CVEs are inside npm's own bundled toolchain (`/usr/local/lib/node_modules/npm/node_modules/tar` and `.../cross-spawn`), not in the application's dependencies. The `node:20-alpine` base image ships with npm baked in, and npm bundles its own copy of `tar` for package extraction. Since fixes exist for these CVEs, `ignore-unfixed: true` did not suppress them.
+
+The application runs as `node src/index.js` — it never invokes npm or tar at runtime. Scanning npm's internal tooling creates noise with no security benefit.
+
+**Fix:** Added `skip-dirs` to the backend Trivy scan to exclude npm and yarn internal modules:
+```yaml
+- name: Trivy scan — backend
+  uses: aquasecurity/trivy-action@master
+  with:
+    skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
+```
+
+**Prevention:** When scanning Node.js images built from `node:alpine`, scope Trivy to application dependencies only. npm and yarn are build-time tools baked into the base image — use `skip-dirs` to exclude their internal `node_modules` from the scan. Apply `ignore-unfixed: true` to the frontend scan (nginx base image) for OS-level CVEs that have no upstream fix yet.
+
+---
+
+### Issue 16 — App CI/CD pipeline: ArgoCD sync failing (`unknown flag: --wait`)
+**Symptom:** The `Trigger ArgoCD sync` step failed with `Error: unknown flag: --wait`.
+
+**Root cause:** `argocd app sync` does not have a `--wait` flag. The flag was incorrectly added to block the step until the sync completed.
+
+**Fix:** Replaced the single `sync --wait` with two commands — `sync` to trigger the reconciliation, followed by `argocd app wait` (which does accept a `--timeout` flag) to block until healthy:
+```bash
+argocd app sync taskboard --server $ARGOCD_SERVER --auth-token $ARGOCD_TOKEN --insecure
+argocd app wait taskboard --server $ARGOCD_SERVER --auth-token $ARGOCD_TOKEN --insecure --timeout 120
+```
+
+**Prevention:** `argocd app sync` triggers the sync and returns immediately. Use `argocd app wait` as a separate step to poll for completion.
+
 ## Terraform apply — outputs and what was done with them
 
 ### Command run
