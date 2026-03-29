@@ -39,10 +39,10 @@ jobs:
 
       # Multi-stage build — context is repo root so Dockerfile can reach app/
       - name: Build frontend image
-        run: docker build -f docker/Dockerfile.frontend -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }} -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:latest .
+        run: docker build -f ${{ github.workspace }}/docker/Dockerfile.frontend -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }} -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:latest ${{ github.workspace }}
 
       - name: Build backend image
-        run: docker build -f docker/Dockerfile.backend -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }} -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:latest .
+        run: docker build -f ${{ github.workspace }}/docker/Dockerfile.backend -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }} -t ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:latest ${{ github.workspace }}
 
       # Trivy scans images for CVEs before they reach ECR
       - name: Trivy scan — frontend
