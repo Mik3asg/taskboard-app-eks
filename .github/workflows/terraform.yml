@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - "terraform/**"
+  workflow_dispatch: # allows manual trigger from GitHub Actions UI
 
 permissions:
   # Required for GitHub OIDC → AWS role assumption (no long-lived keys needed)
