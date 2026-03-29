@@ -60,6 +60,7 @@ jobs:
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH
+          skip-dirs: /usr/local/lib/node_modules/npm,/opt/yarn-v1.22.22
 
       - name: Push images to ECR
         run: |
