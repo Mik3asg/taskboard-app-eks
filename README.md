@@ -15,11 +15,12 @@ Production-grade DevOps assignment: deploy a secure cloud-native task manager (*
 3. [Repository structure](#3-repository-structure)
 4. [Prerequisites](#4-prerequisites)
 5. [Deployment guide (reproduce from scratch)](#5-deployment-guide-reproduce-from-scratch)
-6. [Application — TaskBoard](#6-application--taskboard)
-7. [CI/CD pipelines](#7-cicd-pipelines)
-8. [Monitoring](#8-monitoring)
-9. [Troubleshooting commands](#9-troubleshooting-commands)
-10. [Known issues and fixes](#10-known-issues-and-fixes)
+6. [What is manual vs automated](#6-what-is-manual-vs-automated)
+7. [Application — TaskBoard](#7-application--taskboard)
+8. [CI/CD pipelines](#8-cicd-pipelines)
+9. [Monitoring](#9-monitoring)
+10. [Troubleshooting commands](#10-troubleshooting-commands)
+11. [Known issues and fixes](#11-known-issues-and-fixes)
 
 ---
 
@@ -327,7 +328,58 @@ curl -I https://eks.labs.virtualscale.dev  # HTTP/2 200
 
 ---
 
-## 6. Application — TaskBoard
+## 6. What is manual vs automated
+
+### Always manual (irreducible)
+
+These steps cannot be automated — they require human action regardless of how much of the rest is scripted.
+
+| Step | Why it cannot be automated |
+|---|---|
+| Add NS records at your DNS registrar (e.g. Cloudflare) | Your registrar is external to AWS — Terraform has no API integration with it |
+| Set GitHub Actions secrets in the repo | Secrets cannot be committed to the repo; must be set in GitHub UI |
+| Generate the ArgoCD API token | Requires a running cluster, a browser login to ArgoCD, and patching `argocd-cm` |
+
+### Currently manual but could be moved to Terraform
+
+These steps were performed manually during this project but are straightforward to automate with additional Terraform resources.
+
+| Step | How to automate |
+|---|---|
+| Register GitHub OIDC provider in AWS IAM | Add `aws_iam_openid_connect_provider` resource to `infrastructure/main.tf` |
+| Create `github-actions-terraform` and `github-actions-cicd` IAM roles | Add `aws_iam_role` resources to `infrastructure/main.tf` and expose ARNs as outputs |
+| Install EBS CSI driver (`aws eks create-addon`) | Add `aws_eks_addon` resource to the EKS module (already called out in Issue 1 prevention) |
+
+### Currently manual but could be scripted
+
+These steps are one-liners that could be bundled into a bootstrap shell script run once after `terraform apply`.
+
+| Step | Command |
+|---|---|
+| Connect kubectl to EKS | `aws eks update-kubeconfig --region eu-west-2 --name plane-app-eks-prod` |
+| Install ArgoCD | `kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml` |
+| Enable ArgoCD `apiKey` capability | `kubectl patch configmap argocd-cm -n argocd --type merge -p '{"data": {"accounts.admin": "apiKey, login"}}'` |
+| Apply ArgoCD Applications + ClusterIssuer | `kubectl apply -f kubernetes/argocd/apps/ && kubectl apply -f kubernetes/certmanager/cluster-issuer.yaml` |
+
+### Fully automated on every `git push`
+
+| Trigger | What runs automatically |
+|---|---|
+| Push to `terraform/**` | Terraform fmt check → validate → Checkov security scan → plan → apply |
+| Push to `app/**`, `docker/**`, `kubernetes/app/**` | Docker build → Trivy CVE scan → ECR push → K8s manifest image tag update → ArgoCD sync |
+| Any push | ArgoCD continuously reconciles cluster state from Git |
+| Ingress created/updated | ExternalDNS automatically creates/updates Route53 DNS records |
+| Ingress annotated with ClusterIssuer | cert-manager automatically requests and renews TLS certificates from Let's Encrypt |
+
+### One-time local prerequisite
+
+| Step | When needed |
+|---|---|
+| Run `npm install` in `app/frontend` and `app/backend` to generate `package-lock.json` | Only on a fresh machine where lock files are not yet present — both files are committed to the repo so cloning is sufficient |
+
+---
+
+## 7. Application — TaskBoard
 
 ### Local development
 
@@ -357,7 +409,7 @@ docker compose -f docker/docker-compose.yml up --build
 
 ---
 
-## 7. CI/CD pipelines
+## 8. CI/CD pipelines
 
 ### Pipeline 1 — Terraform (`.github/workflows/terraform.yml`)
 
@@ -382,7 +434,7 @@ Triggered on push to `main` when files under `app/`, `docker/`, or `kubernetes/a
 | ECR push | Pushes both `:latest` and `:<sha>` tags |
 | Update image tags in manifests | `sed` replaces `:latest` in K8s manifests with the new SHA |
 | `git commit + push` | Commits updated manifests (triggers ArgoCD diff) |
-| ArgoCD sync | Calls `argocd app sync taskboard --wait` via API token |
+| ArgoCD sync + wait | Calls `argocd app sync taskboard` then `argocd app wait taskboard --timeout 120` via API token |
 
 ### Authentication
 
@@ -390,7 +442,7 @@ Both pipelines use **GitHub OIDC** — no long-lived AWS credentials are stored.
 
 ---
 
-## 8. Monitoring
+## 9. Monitoring
 
 ### Access Grafana
 
@@ -415,7 +467,7 @@ kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
 
 ---
 
-## 9. Troubleshooting commands
+## 10. Troubleshooting commands
 
 ```bash
 # Cluster health
@@ -477,7 +529,7 @@ curl -I https://eks.labs.virtualscale.dev
 
 ---
 
-## 10. Known issues and fixes
+## 11. Known issues and fixes
 
 A full log of all issues encountered during this project is in [CLAUDE.md](CLAUDE.md#issues-encountered-and-resolved). Key highlights:
 
