@@ -3,8 +3,8 @@ image:
   registry: 207137402976.dkr.ecr.eu-west-2.amazonaws.com
   frontendRepo: taskboard-app-eks/frontend
   backendRepo: taskboard-app-eks/backend
-  frontendTag: "27b021af29f6b972e52f7b4effbf6c0194d9251f"
-  backendTag: "27b021af29f6b972e52f7b4effbf6c0194d9251f"
+  frontendTag: "ca53c4a046fff2f2e29fba9265201947c7e48ef2"
+  backendTag: "ca53c4a046fff2f2e29fba9265201947c7e48ef2"
 
 frontend:
   replicas: 1
