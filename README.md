@@ -1,58 +1,76 @@
-# plane-app-aws-eks
+# taskboard-app-eks
 
-Production-grade DevOps assignment: deploy a secure cloud-native task manager (**TaskBoard**) on Amazon EKS using Terraform IaC, ArgoCD GitOps, GitHub Actions CI/CD, cert-manager TLS, ExternalDNS, and Prometheus + Grafana monitoring.
+Production-grade DevOps project: deploy a secure cloud-native task manager (**TaskBoard**) on Amazon EKS using Terraform IaC, ArgoCD GitOps, GitHub Actions CI/CD, Helm, cert-manager TLS, ExternalDNS, and Prometheus + Grafana monitoring.
 
 **Live URL:** https://eks.labs.virtualscale.dev
-**AWS Region:** eu-west-2
-**EKS Version:** 1.32
+**AWS Region:** eu-west-2 | **EKS Version:** 1.32
 
 ---
 
 ## Table of contents
 
 1. [Project overview](#1-project-overview)
-2. [Architecture](#2-architecture)
-3. [Repository structure](#3-repository-structure)
-4. [Prerequisites](#4-prerequisites)
-5. [Deployment guide (reproduce from scratch)](#5-deployment-guide-reproduce-from-scratch)
-6. [What is manual vs automated](#6-what-is-manual-vs-automated)
-7. [Application — TaskBoard](#7-application--taskboard)
-8. [CI/CD pipelines](#8-cicd-pipelines)
-9. [Monitoring](#9-monitoring)
-10. [Troubleshooting commands](#10-troubleshooting-commands)
-11. [Known issues and fixes](#11-known-issues-and-fixes)
+2. [Key components](#2-key-components)
+3. [Architecture](#3-architecture)
+4. [Repository structure](#4-repository-structure)
+5. [Prerequisites](#5-prerequisites)
+6. [Deployment guide](#6-deployment-guide)
+7. [Manual vs automated](#7-manual-vs-automated)
+8. [Application — TaskBoard](#8-application--taskboard)
+9. [CI/CD pipelines](#9-cicd-pipelines)
+10. [Monitoring](#10-monitoring)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Challenges and fixes](#12-challenges-and-fixes)
+13. [Cost estimate](#13-cost-estimate)
 
 ---
 
 ## 1. Project overview
 
-### What was built
-
 | Deliverable | Technology |
 |---|---|
-| Infrastructure as Code | Terraform (modular: vpc, eks, irsa, dns) |
-| Remote state | S3 + native locking (`use_lockfile = true`, Terraform ≥1.10) |
-| Kubernetes cluster | Amazon EKS 1.32 on t3.medium nodes |
+| Infrastructure as Code | Terraform (modular: vpc, eks, irsa) + S3 remote state |
+| Kubernetes cluster | Amazon EKS 1.32, t3.medium nodes |
 | Ingress + TLS | NGINX Ingress Controller + cert-manager (Let's Encrypt DNS-01) |
 | DNS automation | ExternalDNS → Route53 |
 | GitOps | ArgoCD (app-of-apps pattern) |
-| CI/CD pipeline 1 | GitHub Actions: Terraform validate → Checkov scan → plan → apply |
+| App packaging | Helm chart (`kubernetes/taskboard/`) |
+| CI/CD pipeline 1 | GitHub Actions: Terraform validate → Checkov → plan → apply |
 | CI/CD pipeline 2 | GitHub Actions: Docker build → Trivy scan → ECR push → ArgoCD sync |
 | Monitoring | kube-prometheus-stack (Prometheus + Grafana) |
-| IAM security | IRSA — every Kubernetes service account has its own scoped IAM role |
-
-### Application
-
-TaskBoard is a simple task manager (create / complete / delete tasks):
-
-- **Frontend:** React + Vite, served by nginx on port 80
-- **Backend:** Node.js + Express REST API on port 8000
-- **Database:** PostgreSQL 15 (auto-migrated on startup via db-migrate Job)
-- **Cache:** Redis 7 (caches `GET /api/tasks` for 60 s, invalidated on writes)
+| IAM security | IRSA — each service account has its own scoped IAM role |
 
 ---
 
-## 2. Architecture
+## 2. Key components
+
+### NGINX Ingress Controller
+Acts as the single entry point into the cluster. Receives traffic from the NLB, routes HTTP/HTTPS requests to the correct service based on path (`/` → frontend, `/api` → backend), and terminates TLS using the certificate managed by cert-manager.
+
+### cert-manager (TLS management)
+Automates TLS certificate lifecycle. Watches Ingress resources annotated with a `ClusterIssuer`, requests certificates from Let's Encrypt using the DNS-01 ACME challenge (creates a TXT record in Route53 to prove domain ownership), and renews them automatically before expiry.
+
+### ExternalDNS (dynamic DNS)
+Watches Kubernetes Ingress and Service resources. When an Ingress with a hostname is created, ExternalDNS automatically creates the corresponding A record in Route53 pointing to the NLB. No manual DNS changes needed after the initial NS delegation.
+
+### ArgoCD (GitOps)
+Runs inside the cluster and continuously reconciles cluster state against this Git repository. When a manifest or Helm values file changes on `main`, ArgoCD detects the diff and applies it automatically. Git is the single source of truth — no manual `kubectl apply` needed for app changes.
+
+### Helm
+Kubernetes package manager used to template and deploy the TaskBoard app (`kubernetes/taskboard/`). Values (image tags, resource limits, hostnames) are separated from templates — the CI pipeline stamps new image tags into `values.yaml` on each build, which ArgoCD picks up as a diff and redeploys.
+
+### Checkov (Terraform security scanning)
+Static analysis tool that scans Terraform code for security misconfigurations before infrastructure is provisioned. Runs in the Terraform CI pipeline and fails the build if unaccepted risks are found. Per-module `.checkov.yaml` files document intentional skip decisions with justifications.
+
+### Trivy (container image scanning)
+Scans Docker images for known CVEs before they are pushed to ECR. Runs in the app CI pipeline after the build step. The pipeline fails on `CRITICAL` or `HIGH` severity vulnerabilities to prevent insecure images from reaching the cluster.
+
+### IRSA (IAM Roles for Service Accounts)
+By default all pods on a node share the node's IAM role. IRSA fixes this by assigning a dedicated, scoped IAM role to each Kubernetes service account. cert-manager gets only Route53 DNS-01 permissions; ExternalDNS gets only Route53 record management. Implemented via a reusable `terraform/modules/irsa/` module.
+
+---
+
+## 3. Architecture
 
 ```mermaid
 graph TB
@@ -61,23 +79,22 @@ graph TB
 
     subgraph AWS["AWS — eu-west-2"]
         R53[Route53\nlabs.virtualscale.dev]
-        ECR[ECR\nplane images]
+        ECR[ECR\napp images]
 
         subgraph VPC["VPC  10.0.0.0/16"]
-
             subgraph PublicSubnets["Public Subnets x3"]
-                NLB[Network\nLoad Balancer]
+                NLB[Network Load Balancer]
             end
 
             subgraph PrivateSubnets["Private Subnets x3"]
                 NAT[NAT Gateway]
 
                 subgraph EKS["EKS Cluster  v1.32"]
-                    NGINX[NGINX Ingress\nController]
+                    NGINX[NGINX Ingress Controller]
 
                     subgraph TaskboardNS["namespace: taskboard"]
-                        Web[frontend\nReact :80]
-                        API[backend\nNode.js :8000]
+                        Web[frontend React :80]
+                        API[backend Node.js :8000]
                         PG[(PostgreSQL)]
                         RD[(Redis)]
                     end
@@ -101,7 +118,7 @@ graph TB
             RoleEDNS[external-dns role\nRoute53 ChangeRecordSets]
         end
 
-        S3[S3\nTerraform state]
+        S3[S3 Terraform state]
     end
 
     User -->|HTTPS eks.labs.virtualscale.dev| R53
@@ -130,107 +147,92 @@ graph TB
     PrivateSubnets -->|outbound via| NAT
 ```
 
-Full diagram with component descriptions: [docs/architecture.md](docs/architecture.md)
+**DNS delegation structure:**
+```
+virtualscale.dev              → root domain at Cloudflare (untouched)
+  └── labs.virtualscale.dev       → delegated to Route53 via NS records
+        └── eks.labs.virtualscale.dev  → A record auto-created by ExternalDNS → NLB
+```
 
 ---
 
-## 3. Repository structure
+## 4. Repository structure
 
 ```
 app/
-  frontend/             # React + Vite source (src/App.jsx, vite.config.js)
-  backend/              # Node.js + Express source (src/index.js, routes/tasks.js)
-docker/
-  Dockerfile.frontend   # Multi-stage: Node build → nginx serve
-  Dockerfile.backend    # Node.js production image
-  nginx.conf            # nginx config (React Router + /api proxy)
-  docker-compose.yml    # Local dev environment
+  frontend/             # React + Vite (Dockerfile, nginx.conf, src/)
+  backend/              # Node.js + Express (Dockerfile, src/)
+docker-compose.yml      # Local dev environment
 terraform/
-  bootstrap/            # S3 state bucket (apply once, never again)
-  infrastructure/       # Main infra: VPC + EKS + DNS + IRSA + ECR
+  bootstrap/            # S3 state bucket — apply once
+  infrastructure/       # VPC + EKS + IRSA + ECR + DNS + GitHub OIDC
   modules/
-    vpc/                # VPC, 3 public + 3 private subnets, IGW, NAT GW, route tables
-    eks/                # EKS cluster, managed node group, OIDC provider, EBS CSI add-on
+    vpc/                # VPC, 3 public + 3 private subnets, IGW, NAT GW
+    eks/                # EKS cluster, node group, OIDC provider, EBS CSI add-on
     irsa/               # Reusable IAM role for Kubernetes service accounts
-    dns/                # Route53 hosted zone
 kubernetes/
-  app/                  # TaskBoard manifests (namespace: taskboard)
-  argocd/               # ArgoCD Applications (app-of-apps)
-  certmanager/          # ClusterIssuer (Let's Encrypt DNS-01)
+  taskboard/            # TaskBoard Helm chart (Chart.yaml, values.yaml, templates/)
+  argocd/
+    apps/               # ArgoCD Application resources (one per component)
+    values/             # Helm values for third-party charts (nginx, cert-manager, etc.)
+  certmanager/          # ClusterIssuer (applied once after cert-manager is running)
+  monitoring/           # Grafana admin secret (gitignored — apply manually)
 docs/
-  architecture.md       # Full Mermaid architecture diagram
+  architecture.png      # Architecture diagram
 .github/workflows/
-  terraform.yml         # Terraform CI/CD pipeline
-  app.yml               # App build + deploy pipeline
+  terraform-bootstrap.yml  # Bootstrap pipeline (fmt + validate + Checkov)
+  terraform.yml            # Infrastructure pipeline (validate + Checkov + plan + apply)
+  app.yml                  # App pipeline (build + Trivy + ECR push + ArgoCD sync)
 ```
 
 ---
 
-## 4. Prerequisites
+## 5. Prerequisites
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Terraform | >= 1.10 | IaC provisioning (requires S3 native locking) |
+| Terraform | >= 1.10 | IaC (requires S3 native locking) |
 | AWS CLI | v2 | Interact with AWS |
 | kubectl | >= 1.28 | Manage Kubernetes resources |
 | Docker Desktop | latest | Build and push images locally |
-| Git + Git Bash | any | Version control (Windows users: use Git Bash) |
+| Git + Git Bash | any | Version control |
 
-**AWS account requirements:**
-
-- IAM user or role with permissions for: EC2, EKS, IAM, S3, Route53, ECR
-- A registered domain with DNS you can delegate (this project uses `virtualscale.dev` via Cloudflare)
+**AWS requirements:** IAM permissions for EC2, EKS, IAM, S3, Route53, ECR.
+**DNS requirement:** A registered domain with a registrar you can add NS records to.
 
 ---
 
-## 5. Deployment guide (reproduce from scratch)
+## 6. Deployment guide
 
-### Step 0 — Bootstrap: create Terraform state bucket
+### Step 1 — Bootstrap: create Terraform state bucket
 
 ```bash
 cd terraform/bootstrap
 terraform init
 terraform apply
-# Creates: S3 bucket with versioning + encryption + native locking
 ```
 
-### Step 1 — Provision infrastructure
+Creates: S3 bucket with versioning, encryption, and native locking.
+
+### Step 2 — Provision infrastructure
 
 ```bash
 cd terraform/infrastructure
 terraform init
 terraform apply
-# Creates: VPC, EKS cluster, Route53 hosted zone, IRSA roles, ECR repos,
-#          GitHub OIDC provider, GitHub Actions IAM roles
 ```
 
-Copy the outputs and fill in the Kubernetes manifests:
+Creates: VPC, EKS cluster, Route53 hosted zone, IRSA roles, ECR repos, GitHub OIDC provider, GitHub Actions IAM roles.
 
-| Output | File | Field |
-|---|---|---|
-| `cert_manager_role_arn` | `kubernetes/argocd/apps/cert-manager.yaml` | `eks.amazonaws.com/role-arn` |
-| `external_dns_role_arn` | `kubernetes/argocd/apps/external-dns.yaml` | `eks.amazonaws.com/role-arn` |
-| `ecr_frontend_url`:latest | `kubernetes/app/plane-web.yaml` | `image:` |
-| `ecr_backend_url`:latest | `kubernetes/app/plane-api.yaml` | `image:` |
-| `name_servers` (all 4) | DNS registrar | NS records for your subdomain |
+After apply, note the outputs — you will need them in the next steps:
 
-### Step 2 — Delegate DNS to Route53
-
-**Why two subdomains?**
-
-The app is reachable at `eks.labs.virtualscale.dev`, which follows a deliberate two-level pattern:
-
-```
-virtualscale.dev              → root domain, stays at Cloudflare
-  └── labs.virtualscale.dev       → delegated to Route53 via NS records in Cloudflare
-        └── eks.labs.virtualscale.dev  → A record auto-created by ExternalDNS → NLB
+```bash
+terraform output
 ```
 
-Rather than moving the entire root domain to Route53, only the `labs.` subdomain is delegated. This keeps your root domain and any other records (email, other sites) untouched at Cloudflare, while giving Route53 full ownership of `labs.virtualscale.dev` and everything under it. ExternalDNS and cert-manager can then create and manage records in that zone autonomously — no manual DNS changes needed after the initial delegation.
+### Step 3 — Delegate DNS to Route53
 
-`labs` acts as an environment namespace — you could add more entries under it (e.g. `dev.labs.`, `staging.labs.`, a second cluster at `eks2.labs.`) all managed automatically.
-
-In your DNS registrar (e.g. Cloudflare), add NS records for your subdomain pointing to the 4 AWS name servers from `terraform output name_servers`:
+In your DNS registrar (e.g. Cloudflare), add four NS records for your subdomain pointing to the name servers from `terraform output name_servers`:
 
 ```
 labs.virtualscale.dev  NS  ns-xxxx.awsdns-xx.org
@@ -239,14 +241,14 @@ labs.virtualscale.dev  NS  ns-xxxx.awsdns-xx.com
 labs.virtualscale.dev  NS  ns-xxxx.awsdns-xx.net
 ```
 
-### Step 3 — Connect kubectl to EKS
+### Step 4 — Connect kubectl to EKS
 
 ```bash
-aws eks update-kubeconfig --region eu-west-2 --name plane-app-eks-prod
+aws eks update-kubeconfig --region eu-west-2 --name taskboard-app-eks-prod
 kubectl get nodes   # verify nodes in Ready state
 ```
 
-### Step 4 — Install ArgoCD
+### Step 5 — Install ArgoCD
 
 ```bash
 kubectl create namespace argocd
@@ -254,20 +256,32 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=180s
 ```
 
-### Step 5 — Apply ArgoCD Applications + ClusterIssuer
+### Step 6 — Apply ArgoCD Applications
 
 ```bash
 kubectl apply -f kubernetes/argocd/apps/
-kubectl apply -f kubernetes/certmanager/cluster-issuer.yaml
 ```
 
 ArgoCD will deploy: ingress-nginx, cert-manager, external-dns, taskboard, monitoring.
 
-> The EBS CSI driver is now provisioned automatically by Terraform (`aws_eks_addon` in the EKS module). No manual step required.
+### Step 7 — Apply ClusterIssuer (after cert-manager is Running)
 
-### Step 6 — Configure GitHub Actions secrets
+```bash
+kubectl get pods -n cert-manager   # wait until all Running
+kubectl apply -f kubernetes/certmanager/cluster-issuer.yaml
+```
 
-Go to **Settings → Secrets and variables → Actions** in your GitHub repo and add:
+### Step 8 — Apply Grafana admin secret (before monitoring starts)
+
+```bash
+# Edit the file and set your real password first:
+# kubernetes/monitoring/grafana-admin-secret.yaml  (gitignored)
+kubectl apply -f kubernetes/monitoring/grafana-admin-secret.yaml
+```
+
+### Step 9 — Configure GitHub Actions secrets
+
+Go to **Settings → Secrets and variables → Actions** and add:
 
 | Secret | Value |
 |---|---|
@@ -277,197 +291,148 @@ Go to **Settings → Secrets and variables → Actions** in your GitHub repo and
 | `ARGOCD_SERVER` | ArgoCD external hostname |
 | `ARGOCD_TOKEN` | ArgoCD API token (see below) |
 
-#### Generate ArgoCD API token (Windows Git Bash)
+**Generate ArgoCD API token:**
 
 ```bash
-# Port-forward to ArgoCD (keep this terminal open)
+# Port-forward (keep open)
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 
-# In a new terminal — get the initial admin password
+# Get initial admin password
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d
 
-# Download the CLI binary (Windows)
+# Download CLI (Windows)
 curl -sSL -o argocd.exe \
   https://github.com/argoproj/argo-cd/releases/latest/download/argocd-windows-amd64.exe
 
-# Login
-./argocd.exe login localhost:8080 --username admin --password <password> --insecure
-
-# Enable apiKey capability (required before token generation)
+# Enable apiKey capability
 kubectl patch configmap argocd-cm -n argocd \
-  --type merge \
-  -p '{"data": {"accounts.admin": "apiKey, login"}}'
+  --type merge -p '{"data": {"accounts.admin": "apiKey, login"}}'
 
-# Generate token
+# Login and generate token
+./argocd.exe login localhost:8080 --username admin --password <password> --insecure
 ./argocd.exe account generate-token --account admin
 ```
 
-### Step 7 — Build and push Docker images
-
-```bash
-# Verify Docker is running
-docker info
-
-# Authenticate to ECR
-aws ecr get-login-password --region eu-west-2 | \
-  docker login --username AWS --password-stdin \
-  207137402976.dkr.ecr.eu-west-2.amazonaws.com
-
-# Build and push frontend
-docker build -f docker/Dockerfile.frontend \
-  -t 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-frontend:latest .
-docker push 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-frontend:latest
-
-# Build and push backend
-docker build -f docker/Dockerfile.backend \
-  -t 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-backend:latest .
-docker push 207137402976.dkr.ecr.eu-west-2.amazonaws.com/plane-app-eks/plane-backend:latest
-```
-
-### Step 8 — Push to GitHub and verify
+### Step 10 — Push to GitHub
 
 ```bash
 git push origin main
 ```
 
-ArgoCD detects the push and syncs the taskboard namespace. After a few minutes:
+The CI pipeline builds and pushes images to ECR. ArgoCD syncs the cluster. After a few minutes:
 
 ```bash
 kubectl get pods -n taskboard          # all Running / Completed
 kubectl get certificate -n taskboard   # READY = True
-kubectl get ingress -n taskboard       # ADDRESS populated
 curl -I https://eks.labs.virtualscale.dev  # HTTP/2 200
 ```
 
 ---
 
-## 6. What is manual vs automated
+## 7. Manual vs automated
 
-### Always manual (irreducible)
+### Always manual
 
-These steps cannot be automated — they require human action regardless of how much of the rest is scripted.
-
-| Step | Why it cannot be automated |
+| Step | Why |
 |---|---|
-| Add NS records at your DNS registrar (e.g. Cloudflare) | Your registrar is external to AWS — Terraform has no API integration with it |
-| Set GitHub Actions secrets in the repo | Secrets cannot be committed to the repo; must be set in GitHub UI |
-| Generate the ArgoCD API token | Requires a running cluster, a browser login to ArgoCD, and patching `argocd-cm` |
-
-### Currently manual but could be moved to Terraform
-
-These steps were performed manually during this project but are straightforward to automate with additional Terraform resources.
-
-| Step | How to automate |
-|---|---|
-| Register GitHub OIDC provider in AWS IAM | Add `aws_iam_openid_connect_provider` resource to `infrastructure/main.tf` |
-| Create `github-actions-terraform` and `github-actions-cicd` IAM roles | Add `aws_iam_role` resources to `infrastructure/main.tf` and expose ARNs as outputs |
-| Install EBS CSI driver (`aws eks create-addon`) | Add `aws_eks_addon` resource to the EKS module (already called out in Issue 1 prevention) |
-
-### Currently manual but could be scripted
-
-These steps are one-liners that could be bundled into a bootstrap shell script run once after `terraform apply`.
-
-| Step | Command |
-|---|---|
-| Connect kubectl to EKS | `aws eks update-kubeconfig --region eu-west-2 --name plane-app-eks-prod` |
-| Install ArgoCD | `kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml` |
-| Enable ArgoCD `apiKey` capability | `kubectl patch configmap argocd-cm -n argocd --type merge -p '{"data": {"accounts.admin": "apiKey, login"}}'` |
-| Apply ArgoCD Applications + ClusterIssuer | `kubectl apply -f kubernetes/argocd/apps/ && kubectl apply -f kubernetes/certmanager/cluster-issuer.yaml` |
+| Add NS records at DNS registrar | Registrar is external to AWS — no Terraform integration |
+| Set GitHub Actions secrets | Cannot be committed to the repo |
+| Apply ClusterIssuer | cert-manager CRDs must exist first |
+| Apply Grafana admin secret | Contains credentials — gitignored by design |
+| Generate ArgoCD API token | Requires a running cluster and ArgoCD UI interaction |
 
 ### Fully automated on every `git push`
 
-| Trigger | What runs automatically |
+| Trigger | What happens automatically |
 |---|---|
-| Push to `terraform/**` | Terraform fmt check → validate → Checkov security scan → plan → apply |
-| Push to `app/**`, `docker/**`, `kubernetes/app/**` | Docker build → Trivy CVE scan → ECR push → K8s manifest image tag update → ArgoCD sync |
-| Any push | ArgoCD continuously reconciles cluster state from Git |
-| Ingress created/updated | ExternalDNS automatically creates/updates Route53 DNS records |
-| Ingress annotated with ClusterIssuer | cert-manager automatically requests and renews TLS certificates from Let's Encrypt |
-
-### One-time local prerequisite
-
-| Step | When needed |
-|---|---|
-| Run `npm install` in `app/frontend` and `app/backend` to generate `package-lock.json` | Only on a fresh machine where lock files are not yet present — both files are committed to the repo so cloning is sufficient |
+| Push to `terraform/infrastructure/**` | Terraform validate → Checkov → plan → apply |
+| Push to `app/**` or `kubernetes/**` | Docker build → Trivy scan → ECR push → image tag update → ArgoCD sync |
+| Any push | ArgoCD reconciles cluster state from Git |
+| Ingress created/updated | ExternalDNS creates/updates Route53 A record |
+| Ingress annotated with ClusterIssuer | cert-manager requests and auto-renews TLS certificate |
 
 ---
 
-## 7. Application — TaskBoard
+## 8. Application — TaskBoard
 
-### Local development
+A simple task manager (create / complete / delete tasks):
+
+| Component | Technology | Port |
+|---|---|---|
+| Frontend | React + Vite, served by nginx | 80 |
+| Backend | Node.js + Express REST API | 8000 |
+| Database | PostgreSQL 15 (auto-migrated on deploy) | 5432 |
+| Cache | Redis 7 (60s cache on `GET /api/tasks`) | 6379 |
+
+**Local development:**
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build
+docker compose up --build
 # Open http://localhost:3000
 ```
 
-### Kubernetes manifests (`kubernetes/app/`)
+**Helm chart (`kubernetes/taskboard/`):**
 
-| File | Resource |
+| File | Purpose |
 |---|---|
-| `namespace.yaml` | `taskboard` namespace |
-| `secret.yaml` | `taskboard-secret` (POSTGRES_PASSWORD — dev only, base64-encoded) |
-| `configmap.yaml` | `taskboard-config` (DB connection string, Redis URL) |
-| `postgres.yaml` | PVC (5Gi gp2) + Deployment + Service |
-| `redis.yaml` | Deployment + Service |
-| `plane-api.yaml` | Backend Deployment + Service |
-| `plane-web.yaml` | Frontend Deployment + Service |
-| `plane-worker.yaml` | db-migrate Job (runs on every deploy) |
-| `ingress.yaml` | NGINX Ingress with TLS at `eks.labs.virtualscale.dev` |
-
-### Security notes
-
-- `secret.yaml` contains a base64-encoded password committed to the repo. This is acceptable for a self-training project — in production, use AWS Secrets Manager or External Secrets Operator.
-- Grafana admin password is stored in plain text in `kubernetes/argocd/apps/monitoring.yaml`. In production, use a Kubernetes Secret or SOPS encryption.
+| `Chart.yaml` | Chart metadata |
+| `values.yaml` | All configurable values (image tags updated by CI) |
+| `templates/frontend.yaml` | Deployment + Service |
+| `templates/backend.yaml` | Deployment + Service |
+| `templates/postgres.yaml` | PVC (5Gi gp2) + Deployment + Service |
+| `templates/redis.yaml` | Deployment + Service |
+| `templates/secret.yaml` | POSTGRES_PASSWORD secret |
+| `templates/ingress.yaml` | NGINX Ingress with TLS |
+| `templates/db-migrate.yaml` | Post-install Job — runs migrations after postgres is up |
 
 ---
 
-## 8. CI/CD pipelines
+## 9. CI/CD pipelines
 
-### Pipeline 1 — Terraform (`.github/workflows/terraform.yml`)
+### Pipeline 1 — Terraform bootstrap (`.github/workflows/terraform-bootstrap.yml`)
 
-Triggered on push to `main` when files under `terraform/` change.
+Triggers on changes to `terraform/bootstrap/**`. Runs fmt check, validate, and Checkov scan. No apply — bootstrap is applied manually once.
+
+### Pipeline 2 — Terraform infrastructure (`.github/workflows/terraform.yml`)
+
+Triggers on changes to `terraform/infrastructure/**` or `terraform/modules/**`.
 
 | Step | What it does |
 |---|---|
-| `terraform fmt -check` | Fails if code is not formatted |
+| `terraform fmt -check` | Fails if unformatted |
 | `terraform validate` | Validates HCL syntax |
-| Checkov scan | Scans Terraform for security misconfigurations |
+| Checkov scan | Security misconfiguration scan (skips documented in `.checkov.yaml`) |
 | `terraform plan` | Shows what will change |
-| `terraform apply` | Applies changes (uses GitHub OIDC, no stored credentials) |
+| `terraform apply` | Applies on push to `main` |
 
-### Pipeline 2 — App (`.github/workflows/app.yml`)
+### Pipeline 3 — App (`.github/workflows/app.yml`)
 
-Triggered on push to `main` when files under `app/`, `docker/`, or `kubernetes/app/` change.
+Triggers on changes to `app/**`, `kubernetes/**`, or `charts/**`.
 
 | Step | What it does |
 |---|---|
-| Docker build frontend + backend | Builds images tagged with `${{ github.sha }}` |
-| Trivy scan (CRITICAL + HIGH) | Fails pipeline if critical or high CVEs found |
-| ECR push | Pushes both `:latest` and `:<sha>` tags |
-| Update image tags in manifests | `sed` replaces `:latest` in K8s manifests with the new SHA |
-| `git commit + push` | Commits updated manifests (triggers ArgoCD diff) |
-| ArgoCD sync + wait | Calls `argocd app sync taskboard` then `argocd app wait taskboard --timeout 120` via API token |
+| Docker build | Builds frontend + backend images tagged with `${{ github.sha }}` |
+| Trivy scan | Fails on CRITICAL/HIGH CVEs; `skip-dirs` excludes npm internals |
+| ECR push | Pushes `:<sha>` and `:latest` tags |
+| Update image tags | `sed` stamps new SHA into `kubernetes/taskboard/values.yaml` |
+| `git commit + push` | Commits updated values (ArgoCD detects diff) |
+| ArgoCD sync + wait | `argocd app sync` then `argocd app wait --timeout 120` |
 
-### Authentication
-
-Both pipelines use **GitHub OIDC** — no long-lived AWS credentials are stored. GitHub requests a short-lived JWT, which is exchanged for AWS temporary credentials via `sts:AssumeRoleWithWebIdentity`.
+**Authentication:** Both AWS pipelines use GitHub OIDC — no long-lived credentials stored.
 
 ---
 
-## 9. Monitoring
+## 10. Monitoring
 
-### Access Grafana
+**Access Grafana:**
 
 ```bash
-kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
-# Open http://127.0.0.1:3000/login
-# Username: admin
-# Password: (set in kubernetes/argocd/apps/monitoring.yaml)
+kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
+# Open http://127.0.0.1:3000 — username: admin
 ```
 
-### Pre-loaded dashboards
+**Pre-loaded dashboards:**
 
 | Dashboard | Grafana ID | Shows |
 |---|---|---|
@@ -475,103 +440,136 @@ kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
 | Kubernetes Pods | 6417 | Per-pod CPU/memory, restarts |
 | NGINX Ingress | 9614 | Request rate, latency, error rate |
 
-### Prometheus retention
-
-7 days, stored on a 5Gi EBS `gp2` volume (`storageClassName: gp2` required explicitly on EKS).
+Prometheus retention: 7 days on a 5Gi EBS `gp2` volume.
 
 ---
 
-## 10. Troubleshooting commands
+## 11. Troubleshooting
 
 ```bash
 # Cluster health
-kubectl get nodes
-kubectl get pods -A
-kubectl top nodes
-kubectl top pods -A
+kubectl get nodes && kubectl get pods -A
 
 # ArgoCD sync status
 kubectl get applications -n argocd
+kubectl describe application <name> -n argocd | tail -30
 
-# Ingress and TLS
-kubectl get ingress -n taskboard
+# TLS certificate
 kubectl get certificate -n taskboard
 kubectl describe certificate taskboard-tls -n taskboard
-kubectl describe certificaterequest -n taskboard
 
-# cert-manager ACME logs
-kubectl logs -n cert-manager -l app=cert-manager --tail=50
+# cert-manager logs
+kubectl logs -n cert-manager deployment/cert-manager --tail=30
 
 # ExternalDNS logs
-kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=50
+kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=30
 
-# NGINX Ingress logs
-kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=50
+# App logs
+kubectl logs -n taskboard -l app=backend --tail=30
+kubectl logs -n taskboard -l app=frontend --tail=30
 
-# Taskboard pods
-kubectl get pods -n taskboard
-kubectl logs -n taskboard -l app=backend --tail=50
-kubectl logs -n taskboard -l app=frontend --tail=50
-kubectl logs -n taskboard -l app=postgres --tail=50
+# Force ArgoCD resync
+kubectl patch application taskboard -n argocd --type merge -p '{"operation": null}'
+kubectl annotate application taskboard -n argocd argocd.argoproj.io/refresh=hard --overwrite
 
-# PVC status
-kubectl get pvc -A
-
-# Verify subnet tags (needed for NLB provisioning)
-aws ec2 describe-subnets \
-  --subnet-ids subnet-0e23e1d2780d4ece7 subnet-0cedea7f1c22439de subnet-0f5cdfde400ffbc6f \
-  --query 'Subnets[*].Tags[?starts_with(Key, `kubernetes.io`)]' \
-  --region eu-west-2
-
-# Scale nodes up (for testing)
+# Scale nodes up/down
 aws eks update-nodegroup-config \
-  --cluster-name plane-app-eks-prod \
-  --nodegroup-name plane-app-eks-prod-nodes \
+  --cluster-name taskboard-app-eks-prod \
+  --nodegroup-name taskboard-app-eks-prod-nodes \
   --scaling-config minSize=1,maxSize=2,desiredSize=2 \
   --region eu-west-2
-
-# Scale nodes down (to save cost)
-aws eks update-nodegroup-config \
-  --cluster-name plane-app-eks-prod \
-  --nodegroup-name plane-app-eks-prod-nodes \
-  --scaling-config minSize=1,maxSize=2,desiredSize=1 \
-  --region eu-west-2
-
-# Test app
-curl -I https://eks.labs.virtualscale.dev
 ```
 
 ---
 
-## 11. Known issues and fixes
+## 12. Challenges and fixes
 
-A full log of all issues encountered during this project is in [CLAUDE.md](CLAUDE.md#issues-encountered-and-resolved). Key highlights:
+### NLB stuck in `<pending>` — wrong subnet tags
 
-| # | Issue | Root cause | Fix |
-|---|---|---|---|
-| 6 | NLB stuck in `<pending>` | VPC subnet tags had wrong cluster name | Fixed `cluster_name = "${var.project_name}-${var.environment}"` in `main.tf` |
-| 7 | All pods `Pending` — too many pods | t3.medium hard limit: 17 pods | Scaled to 2 nodes |
-| 10 | postgres PVC `Pending` | No `storageClassName` in PVC spec | Added `storageClassName: gp2` to `postgres.yaml` |
-| 11 | postgres `CrashLoopBackOff` | EBS `lost+found` in data dir | Added `subPath: postgres` to volumeMount |
-| 12 | cert-manager `AccessDenied` on Route53 | IRSA trust policy had `serviceaccounts` (plural) | Fixed to `serviceaccount` (singular) in `irsa/main.tf` |
-| 13 | Prometheus PVC `Pending` | Missing `storageClassName` in Helm values | Added `storageClassName: gp2` to `monitoring.yaml`, deleted StatefulSet + PVC |
+**Symptom:** `ingress-nginx-controller` service `EXTERNAL-IP` stayed `<pending>` for hours.
+**Root cause:** The VPC module was passing `cluster_name = var.project_name` (`taskboard-app-eks`) instead of `"${var.project_name}-${var.environment}"` (`taskboard-app-eks-prod`). The EKS CCM looks for subnets tagged `kubernetes.io/cluster/<cluster-name>: shared` — the mismatch meant no subnets matched and no ELB was provisioned.
+**Fix:** Corrected the variable in `infrastructure/main.tf`. Manually added the correct tags to existing subnets to unblock immediately.
 
 ---
 
-## Cost estimate (eu-west-2, approx.)
+### All pods `Pending` — node pod limit reached
 
-| Resource | Monthly cost |
+**Symptom:** Pods couldn't be scheduled despite low CPU/memory usage. Error: `Too many pods`.
+**Root cause:** `t3.medium` has a hard pod limit of 17 (EKS VPC CNI assigns a real VPC IP per pod; limit = ENIs × IPs per ENI). With ArgoCD + kube-system + add-ons, the node was full before app pods could schedule.
+**Fix:** Scaled to 2 nodes temporarily. Long-term: enable prefix delegation on the VPC CNI to raise the limit to 110 without adding nodes.
+
+---
+
+### postgres `CrashLoopBackOff` — `lost+found` in data directory
+
+**Symptom:** postgres pod crashed immediately after PVC was provisioned.
+**Root cause:** EBS volumes are formatted with ext4, which creates a `lost+found` directory at the root. PostgreSQL refuses to initialise a data directory that is not empty.
+**Fix:** Added `subPath: postgres` to the volumeMount so postgres data goes into a subdirectory, bypassing `lost+found`.
+
+---
+
+### cert-manager `AccessDenied` on Route53 — IRSA trust policy typo
+
+**Symptom:** DNS-01 challenges failed with `AccessDenied` despite IRSA being configured.
+**Root cause:** The IRSA module had `system:serviceaccounts:` (plural) in the `sub` condition. Kubernetes OIDC tokens use `system:serviceaccount:` (singular). AWS STS never matched the condition and rejected all `AssumeRoleWithWebIdentity` calls.
+**Fix:** Corrected the typo in `terraform/modules/irsa/main.tf` and ran `terraform apply`.
+
+---
+
+### Prometheus PVC `Pending` — missing EBS CSI driver
+
+**Symptom:** Prometheus pod stayed `Pending`; PVC had no storage class.
+**Root cause:** EKS does not install the EBS CSI driver by default. Without it no `gp2` StorageClass provisioner exists and PVCs remain unbound.
+**Fix:** Attached `AmazonEBSCSIDriverPolicy` to the node role and installed `aws-ebs-csi-driver` as a managed EKS add-on. Added it to the EKS Terraform module so it provisions automatically going forward.
+
+---
+
+### Docker build failing — trailing newline in ECR_REGISTRY secret
+
+**Symptom:** `docker buildx build requires 1 argument`.
+**Root cause:** The `ECR_REGISTRY` GitHub secret had a trailing newline. GitHub expands secrets before the shell sees them, so the newline was injected literally into the command, splitting the `-t` argument.
+**Fix:** Re-saved the secret without the trailing newline. Quoted all `${{ env.* }}` expansions in the workflow.
+
+---
+
+### Trivy scan failing on npm internal CVEs
+
+**Symptom:** Trivy flagged HIGH CVEs in `npm/node_modules/tar` inside the backend image.
+**Root cause:** The `node:20-alpine` base image bundles npm with its own copy of `tar`. These are npm's internal tools — never invoked at runtime.
+**Fix:** Added `skip-dirs: /usr/local/lib/node_modules/npm` to the Trivy scan step.
+
+---
+
+### db-migrate hook failing — postgres not yet running
+
+**Symptom:** `db-migrate` pod failed with `ENOTFOUND postgres`.
+**Root cause:** `db-migrate` was a `pre-install` hook — it ran before any other resources (including postgres) were deployed.
+**Fix:** Changed the hook to `post-install,post-upgrade` so it runs after postgres is up.
+
+---
+
+### LoadBalancer image pull — ExternalDNS `ImagePullBackOff`
+
+**Symptom:** ExternalDNS pod stuck in `ImagePullBackOff` pulling from Docker Hub.
+**Root cause:** Docker Hub enforces rate limits on anonymous pulls from shared EKS node IPs. The Bitnami chart pulls from `docker.io/bitnami/external-dns`.
+**Fix:** Switched to the official `kubernetes-sigs/external-dns` chart which pulls from a registry without rate limits.
+
+---
+
+## 13. Cost estimate (eu-west-2, approx.)
+
+| Resource | Monthly |
 |---|---|
 | EKS control plane | ~$73 |
-| 2 x t3.medium nodes | ~$60 |
+| 2 × t3.medium nodes | ~$60 |
 | NAT Gateway | ~$35 |
-| EBS volumes (2 x 5Gi gp2) | ~$1 |
+| EBS volumes (2 × 5Gi gp2) | ~$1 |
 | Route53 hosted zone | ~$0.50 |
 | **Total** | **~$170/month** |
 
-Scale to 1 node when not testing (~$110/month). Destroy everything when done:
+Scale to 1 node when not in use (~$110/month). Destroy everything when done:
 
 ```bash
 cd terraform/infrastructure && terraform destroy
-cd terraform/bootstrap    && terraform destroy
+cd terraform/bootstrap     && terraform destroy
 ```
