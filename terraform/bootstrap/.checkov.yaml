@@ -1,0 +1,11 @@
+skip-checks:
+  # CKV_AWS_144 — S3 Cross-Region Replication: not required for a single-region Terraform state bucket
+  - CKV_AWS_144
+  # CKV2_AWS_62 — S3 Event Notifications: no downstream consumers needed for a state bucket
+  - CKV2_AWS_62
+  # CKV_AWS_18 — S3 Access Logging: no compliance or audit requirement for the state bucket
+  - CKV_AWS_18
+  # CKV_AWS_145 — S3 KMS Encryption: AES-256 SSE-S3 is sufficient; KMS adds per-call cost
+  - CKV_AWS_145
+  # CKV2_AWS_61 — S3 Lifecycle Policy: state files must be retained indefinitely; expiry rules would corrupt the backend
+  - CKV2_AWS_61

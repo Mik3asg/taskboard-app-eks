@@ -47,12 +47,12 @@ output "cluster_oidc_issuer_url" {
 
 output "hosted_zone_id" {
   description = "Route53 hosted zone ID"
-  value       = module.dns.zone_id
+  value       = aws_route53_zone.main.zone_id
 }
 
 output "name_servers" {
   description = "NS records to add to the parent zone (virtualscale.dev) for delegation"
-  value       = module.dns.name_servers
+  value       = aws_route53_zone.main.name_servers
 }
 
 // ─── IRSA ─────────────────────────────────────────────────────────────────────
@@ -82,16 +82,12 @@ output "github_cicd_role_arn" {
 // ─── ECR ──────────────────────────────────────────────────────────────────────
 
 output "ecr_frontend_url" {
-  description = "ECR repository URL for the Plane frontend image"
-  value       = aws_ecr_repository.plane_frontend.repository_url
+  description = "ECR repository URL for the TaskBoard frontend image"
+  value       = aws_ecr_repository.frontend.repository_url
 }
 
 output "ecr_backend_url" {
-  description = "ECR repository URL for the Plane backend image"
-  value       = aws_ecr_repository.plane_backend.repository_url
+  description = "ECR repository URL for the TaskBoard backend image"
+  value       = aws_ecr_repository.backend.repository_url
 }
 
-output "ecr_worker_url" {
-  description = "ECR repository URL for the Plane worker image"
-  value       = aws_ecr_repository.plane_worker.repository_url
-}

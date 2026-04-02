@@ -14,7 +14,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "plane-app-eks-terraform-state"
+    bucket       = "taskboard-app-eks-terraform-state"
     key          = "infrastructure/terraform.tfstate"
     region       = "eu-west-2"
     use_lockfile = true

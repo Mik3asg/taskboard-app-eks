@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Project name"
   type        = string
-  default     = "plane-app-eks"
+  default     = "taskboard-app-eks"
 }
 
 variable "environment" {
@@ -37,5 +37,5 @@ variable "domain_name" {
 variable "github_repo" {
   description = "GitHub repository in org/repo format — used to scope the GitHub Actions OIDC trust policy"
   type        = string
-  default     = "Mik3asg/plane-app-aws-eks"
+  default     = "Mik3asg/taskboard-app-eks"
 }

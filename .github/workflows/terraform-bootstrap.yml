@@ -1,0 +1,60 @@
+name: Terraform Bootstrap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/bootstrap/**"
+      - ".github/workflows/terraform-bootstrap.yml"
+  pull_request:
+    paths:
+      - "terraform/bootstrap/**"
+      - ".github/workflows/terraform-bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  TF_VERSION: "1.10.0"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  bootstrap:
+    name: Bootstrap (S3 state bucket)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/bootstrap
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Checkov security scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/bootstrap
+          framework: terraform
+          soft_fail: false
+          config_file: terraform/bootstrap/.checkov.yaml

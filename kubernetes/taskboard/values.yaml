@@ -1,0 +1,68 @@
+# Image registry and tags — CI pipeline updates frontendTag and backendTag on every build
+image:
+  registry: 207137402976.dkr.ecr.eu-west-2.amazonaws.com
+  frontendRepo: taskboard-app-eks/frontend
+  backendRepo: taskboard-app-eks/backend
+  frontendTag: "latest"
+  backendTag: "latest"
+
+frontend:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+backend:
+  replicas: 1
+  port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 400m
+      memory: 256Mi
+
+postgres:
+  image: postgres:15-alpine
+  port: 5432
+  database: taskboard
+  user: taskboard
+  storage: 5Gi
+  storageClass: gp2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+redis:
+  image: redis:7-alpine
+  port: 6379
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+dbMigrate:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+ingress:
+  host: eks.labs.virtualscale.dev
+  clusterIssuer: letsencrypt-prod
+  tlsSecretName: taskboard-tls

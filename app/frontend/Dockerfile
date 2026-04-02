@@ -13,11 +13,11 @@ RUN npm run build
 
 # ── Stage 2: Serve static files with nginx ────────────────────────────────────
 FROM nginx:alpine
-# Upgrade all packages to pick up security patches (e.g. zlib CVE-2026-22184)
+# Upgrade all packages to pick up security patches
 RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Custom nginx config handles React Router and proxies /api to the backend
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY app/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

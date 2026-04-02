@@ -27,6 +27,9 @@ Thumbs.db
 /argocd.exe
 /ebs-csi-trust.json
 
+# ── Kubernetes secrets (apply manually — never commit real values) ─────────────
+kubernetes/monitoring/grafana-admin-secret.yaml
+
 # ── Claude Code ───────────────────────────────────────────────────────────────
 CLAUDE.md
 

@@ -7,86 +7,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: https://prometheus-community.github.io/helm-charts
-    chart: kube-prometheus-stack
-    targetRevision: 58.6.0
-    helm:
-      values: |
-        # Cost-minimised config — sufficient for dashboards and alerting in a self-training setup
-        alertmanager:
-          enabled: false
-
-        prometheus:
-          prometheusSpec:
-            retention: 7d
-            resources:
-              requests:
-                cpu: 150m
-                memory: 400Mi
-              limits:
-                cpu: 500m
-                memory: 800Mi
-            storageSpec:
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  storageClassName: gp2
-                  resources:
-                    requests:
-                      storage: 5Gi
-
-        grafana:
-          adminPassword: "planeappawseks0622102985"
-          resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
-          # Pre-load dashboards for EKS node and pod monitoring
-          dashboardProviders:
-            dashboardproviders.yaml:
-              apiVersion: 1
-              providers:
-                - name: default
-                  folder: EKS
-                  type: file
-                  options:
-                    path: /var/lib/grafana/dashboards/default
-          dashboards:
-            default:
-              kubernetes-cluster:
-                gnetId: 7249
-                revision: 1
-                datasource: Prometheus
-              kubernetes-pods:
-                gnetId: 6417
-                revision: 1
-                datasource: Prometheus
-              nginx-ingress:
-                gnetId: 9614
-                revision: 1
-                datasource: Prometheus
-
-        nodeExporter:
-          resources:
-            requests:
-              cpu: 25m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-
-        kubeStateMetrics:
-          resources:
-            requests:
-              cpu: 25m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 58.6.0
+      helm:
+        valueFiles:
+          - $values/kubernetes/argocd/values/monitoring.yaml
+    - repoURL: https://github.com/Mik3asg/taskboard-app-eks
+      targetRevision: HEAD
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

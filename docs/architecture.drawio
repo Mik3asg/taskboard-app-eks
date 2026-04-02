@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" version="21.0.0">
+  <diagram name="plane-app-aws-eks Architecture" id="plane-arch-001">
+    <mxGraphModel dx="1200" dy="800" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2300" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ── External actors ─────────────────────────────────────────── -->
+
+        <mxCell id="2" value="User Browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="3" value="Cloudflare&#xa;(DNS Registrar)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="80" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="4" value="GitHub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="80" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="5" value="Let's Encrypt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1840" y="80" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── AWS container ───────────────────────────────────────────── -->
+
+        <mxCell id="6" value="AWS — eu-west-2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#f0a500;fontSize=15;fontStyle=1;verticalAlign=top;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="2140" height="1320" as="geometry" />
+        </mxCell>
+
+        <!-- Route53 -->
+        <mxCell id="7" value="Route53&#xa;labs.virtualscale.dev" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="280" width="170" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ECR -->
+        <mxCell id="8" value="Amazon ECR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1910" y="280" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- S3 -->
+        <mxCell id="9" value="S3 — Terraform state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1910" y="380" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── VPC ─────────────────────────────────────────────────────── -->
+
+        <mxCell id="10" value="VPC — 10.0.0.0/16" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;fontSize=13;fontStyle=1;verticalAlign=top;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="380" width="1820" height="1100" as="geometry" />
+        </mxCell>
+
+        <!-- Public Subnets -->
+        <mxCell id="11" value="Public Subnets ×3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;fontSize=11;fontStyle=1;verticalAlign=top;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="450" width="200" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- NLB -->
+        <mxCell id="12" value="Network&#xa;Load Balancer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="95" y="510" width="165" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Private Subnets -->
+        <mxCell id="13" value="Private Subnets ×3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontSize=11;fontStyle=1;verticalAlign=top;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="450" width="1560" height="1000" as="geometry" />
+        </mxCell>
+
+        <!-- NAT Gateway -->
+        <mxCell id="14" value="NAT Gateway" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="520" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── EKS Cluster ──────────────────────────────────────────────── -->
+
+        <mxCell id="15" value="EKS Cluster — v1.32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontSize=13;fontStyle=1;verticalAlign=top;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="470" y="480" width="1370" height="950" as="geometry" />
+        </mxCell>
+
+        <!-- NGINX Ingress Controller -->
+        <mxCell id="16" value="NGINX Ingress Controller" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="550" width="210" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ── namespace: taskboard ──────────────────────────────────────── -->
+
+        <mxCell id="17" value="namespace: taskboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f9a825;fontSize=11;fontStyle=1;verticalAlign=top;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="640" width="740" height="230" as="geometry" />
+        </mxCell>
+
+        <mxCell id="18" value="frontend&#xa;React / nginx :80" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="510" y="715" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="19" value="backend&#xa;Node.js :8000" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="690" y="715" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="20" value="PostgreSQL" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=10;boundedLbl=1;backgroundOutline=1;size=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="715" width="100" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="21" value="Redis" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=10;boundedLbl=1;backgroundOutline=1;size=10;" vertex="1" parent="1">
+          <mxGeometry x="990" y="715" width="100" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── namespace: add-ons ─────────────────────────────────────────── -->
+
+        <mxCell id="22" value="namespace: add-ons" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f9a825;fontSize=11;fontStyle=1;verticalAlign=top;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="640" width="570" height="230" as="geometry" />
+        </mxCell>
+
+        <mxCell id="23" value="ArgoCD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="715" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="24" value="cert-manager" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="715" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="25" value="ExternalDNS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1590" y="715" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── namespace: monitoring ──────────────────────────────────────── -->
+
+        <mxCell id="26" value="namespace: monitoring" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f9a825;fontSize=11;fontStyle=1;verticalAlign=top;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="920" width="420" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="27" value="Prometheus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="510" y="990" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="28" value="Grafana" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="670" y="990" width="120" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── IAM / IRSA ──────────────────────────────────────────────── -->
+
+        <mxCell id="29" value="IAM / IRSA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#7b1fa2;fontSize=13;fontStyle=1;verticalAlign=top;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1910" y="500" width="230" height="240" as="geometry" />
+        </mxCell>
+
+        <mxCell id="30" value="cert-manager IAM role" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1920" y="565" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="31" value="external-dns IAM role" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1920" y="660" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── Edges ──────────────────────────────────────────────────── -->
+
+        <!-- User → Route53 (HTTPS) -->
+        <mxCell id="40" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;strokeColor=#6c8ebf;" edge="1" source="2" target="7" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Cloudflare → Route53 (NS delegation) -->
+        <mxCell id="41" value="NS delegation" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#b85450;" edge="1" source="3" target="7" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Route53 → NLB -->
+        <mxCell id="42" value="A record" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="7" target="12" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- NLB → NGINX -->
+        <mxCell id="43" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="12" target="16" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- NGINX → Frontend -->
+        <mxCell id="44" value="/" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="16" target="18" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- NGINX → Backend -->
+        <mxCell id="45" value="/api" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="16" target="19" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Backend → Postgres -->
+        <mxCell id="46" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="19" target="20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Backend → Redis -->
+        <mxCell id="47" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="19" target="21" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- GitHub → ECR (CI build & push) -->
+        <mxCell id="48" value="CI: build &amp; push" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;strokeColor=#b85450;" edge="1" source="4" target="8" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- GitHub → ArgoCD (push triggers sync) -->
+        <mxCell id="49" value="push triggers sync" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;strokeColor=#b85450;" edge="1" source="4" target="23" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ECR → EKS (pull images) -->
+        <mxCell id="50" value="pull images" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#d6b656;" edge="1" source="8" target="15" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- cert-manager → Let's Encrypt -->
+        <mxCell id="51" value="ACME" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#82b366;" edge="1" source="24" target="5" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- cert-manager → Route53 (DNS-01) -->
+        <mxCell id="52" value="DNS-01 challenge" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#82b366;" edge="1" source="24" target="7" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ExternalDNS → Route53 -->
+        <mxCell id="53" value="upsert A record" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#82b366;" edge="1" source="25" target="7" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- cert-manager → IAM role (IRSA) -->
+        <mxCell id="54" value="IRSA" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#9673a6;" edge="1" source="24" target="30" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ExternalDNS → IAM role (IRSA) -->
+        <mxCell id="55" value="IRSA" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#9673a6;" edge="1" source="25" target="31" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Grafana → Prometheus -->
+        <mxCell id="56" value="queries" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" source="28" target="27" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

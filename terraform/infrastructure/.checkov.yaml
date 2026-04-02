@@ -1,0 +1,29 @@
+skip-checks:
+  # CKV_AWS_274 — IAM AdministratorAccess: CI/CD role needs broad Terraform permissions; scope to least-privilege in production
+  - CKV_AWS_274
+  # CKV_AWS_51 — ECR Mutable Tags: pipeline pushes :latest which requires mutable tags; SHA tags are immutable by nature
+  - CKV_AWS_51
+  # CKV_AWS_136 — ECR KMS Encryption: AES-256 default encryption is sufficient; KMS adds per-call cost
+  - CKV_AWS_136
+  # CKV_AWS_382 — Security Group Open Egress: EKS nodes require unrestricted outbound to reach AWS APIs and pull images
+  - CKV_AWS_382
+  # CKV_AWS_39 — EKS Public API Endpoint: required for kubectl access from laptops and CI/CD runners with dynamic IPs
+  - CKV_AWS_39
+  # CKV_AWS_38 — EKS Public Endpoint CIDR Restriction: GitHub Actions runners use ephemeral IPs that cannot be pre-whitelisted
+  - CKV_AWS_38
+  # CKV_AWS_37 — EKS Control Plane Logging: api/audit/authenticator enabled; scheduler/controllerManager omitted to reduce CloudWatch cost
+  - CKV_AWS_37
+  # CKV_AWS_58 — EKS Secrets KMS Encryption: etcd is already encrypted at rest by default; KMS envelope adds cost
+  - CKV_AWS_58
+  # CKV_AWS_130 — Public Subnet Auto-Assign IP: required for NLB nodes in public subnets to receive internet traffic
+  - CKV_AWS_130
+  # CKV2_AWS_5 — Security Group Unattached: false positive — node SG is attached via aws_eks_node_group, not directly in SG block
+  - CKV2_AWS_5
+  # CKV2_AWS_12 — Default VPC SG Restriction: default SG is not used by any resource in this project
+  - CKV2_AWS_12
+  # CKV2_AWS_11 — VPC Flow Logs: no compliance requirement; flow logs billed per GB in CloudWatch
+  - CKV2_AWS_11
+  # CKV2_AWS_38 — Route53 DNSSEC: requires KMS key + registrar DS record setup; unnecessary for this hosted zone
+  - CKV2_AWS_38
+  # CKV2_AWS_39 — Route53 DNS Query Logging: no DNS-level audit requirement; adds CloudWatch ingestion cost
+  - CKV2_AWS_39

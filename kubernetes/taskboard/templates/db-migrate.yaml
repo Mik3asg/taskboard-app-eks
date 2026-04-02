@@ -1,0 +1,35 @@
+# Runs as a Helm pre-upgrade hook so migrations execute before the new backend starts.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "taskboard.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: {{ .Values.image.registry }}/{{ .Values.image.backendRepo }}:{{ .Values.image.backendTag }}
+          command: ["node", "src/migrate.js"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taskboard-secret
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}"
+          resources:
+            requests:
+              cpu: {{ .Values.dbMigrate.resources.requests.cpu }}
+              memory: {{ .Values.dbMigrate.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.dbMigrate.resources.limits.cpu }}
+              memory: {{ .Values.dbMigrate.resources.limits.memory }}

@@ -2,31 +2,31 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: taskboard-ingress
-  namespace: taskboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "taskboard.labels" . | nindent 4 }}
   annotations:
     kubernetes.io/ingress.class: "nginx"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    external-dns.alpha.kubernetes.io/hostname: "eks.labs.virtualscale.dev"
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.ingress.host | quote }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
 spec:
   tls:
     - hosts:
-        - eks.labs.virtualscale.dev
-      secretName: taskboard-tls
+        - {{ .Values.ingress.host }}
+      secretName: {{ .Values.ingress.tlsSecretName }}
   rules:
-    - host: eks.labs.virtualscale.dev
+    - host: {{ .Values.ingress.host }}
       http:
         paths:
-          # API calls from the React frontend — routed to the Express backend
           - path: /api
             pathType: Prefix
             backend:
               service:
                 name: backend
                 port:
-                  number: 8000
-          # All other traffic — served by the nginx-fronted React app
+                  number: {{ .Values.backend.port }}
           - path: /
             pathType: Prefix
             backend:

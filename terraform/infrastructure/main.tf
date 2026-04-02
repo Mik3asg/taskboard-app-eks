@@ -23,12 +23,17 @@ module "eks" {
 
 // ─── DNS ──────────────────────────────────────────────────────────────────────
 
-module "dns" {
-  source = "../modules/dns"
+// Public hosted zone for the subdomain. After apply, copy the NS records output
+// into the parent zone registrar (e.g. Cloudflare) to delegate to Route53.
+resource "aws_route53_zone" "main" {
+  name = var.domain_name
 
-  project_name = var.project_name
-  environment  = var.environment
-  domain_name  = var.domain_name
+  tags = {
+    Name        = var.domain_name
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
 }
 
 // ─── IRSA: ExternalDNS ────────────────────────────────────────────────────────
@@ -53,7 +58,7 @@ module "irsa_external_dns" {
       {
         Effect   = "Allow"
         Action   = ["route53:ChangeResourceRecordSets"]
-        Resource = ["arn:aws:route53:::hostedzone/${module.dns.zone_id}"]
+        Resource = ["arn:aws:route53:::hostedzone/${aws_route53_zone.main.zone_id}"]
       },
       {
         Effect   = "Allow"
@@ -91,7 +96,7 @@ module "irsa_cert_manager" {
       {
         Effect   = "Allow"
         Action   = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"]
-        Resource = ["arn:aws:route53:::hostedzone/${module.dns.zone_id}"]
+        Resource = ["arn:aws:route53:::hostedzone/${aws_route53_zone.main.zone_id}"]
       },
       {
         Effect   = "Allow"
@@ -188,10 +193,10 @@ resource "aws_iam_role_policy_attachment" "github_cicd_eks" {
 
 // ─── ECR Repositories ─────────────────────────────────────────────────────────
 
-// One repo per Plane service. The CI pipeline builds, tags, and pushes images
+// One repo per TaskBoard service. The CI pipeline builds, tags, and pushes images
 // here; the K8s manifests reference these repos via the outputs below.
-resource "aws_ecr_repository" "plane_frontend" {
-  name                 = "${var.project_name}/plane-frontend"
+resource "aws_ecr_repository" "frontend" {
+  name                 = "${var.project_name}/frontend"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -205,8 +210,8 @@ resource "aws_ecr_repository" "plane_frontend" {
   }
 }
 
-resource "aws_ecr_repository" "plane_backend" {
-  name                 = "${var.project_name}/plane-backend"
+resource "aws_ecr_repository" "backend" {
+  name                 = "${var.project_name}/backend"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -220,17 +225,3 @@ resource "aws_ecr_repository" "plane_backend" {
   }
 }
 
-resource "aws_ecr_repository" "plane_worker" {
-  name                 = "${var.project_name}/plane-worker"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
-}

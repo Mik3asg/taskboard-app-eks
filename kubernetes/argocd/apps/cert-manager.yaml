@@ -7,41 +7,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: https://charts.jetstack.io
-    chart: cert-manager
-    targetRevision: v1.14.5
-    helm:
-      values: |
-        # Install the CRDs as part of the Helm release so they are version-locked
-        installCRDs: true
-        serviceAccount:
-          annotations:
-            # IRSA: swap this placeholder with the Terraform output cert_manager_role_arn
-            eks.amazonaws.com/role-arn: "arn:aws:iam::207137402976:role/plane-app-eks-prod-cert-manager"
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 128Mi
-        webhook:
-          resources:
-            requests:
-              cpu: 20m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-        cainjector:
-          resources:
-            requests:
-              cpu: 20m
-              memory: 64Mi
-            limits:
-              cpu: 100m
-              memory: 128Mi
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.14.5
+      helm:
+        valueFiles:
+          - $values/kubernetes/argocd/values/cert-manager.yaml
+    - repoURL: https://github.com/Mik3asg/taskboard-app-eks
+      targetRevision: HEAD
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager

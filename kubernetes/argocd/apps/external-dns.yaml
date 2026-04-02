@@ -7,33 +7,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    # Switched from Bitnami (Docker Hub rate limits) to official kubernetes-sigs chart
-    repoURL: https://kubernetes-sigs.github.io/external-dns/
-    chart: external-dns
-    targetRevision: 1.14.5
-    helm:
-      values: |
-        provider:
-          name: aws
-        env:
-          - name: AWS_DEFAULT_REGION
-            value: eu-west-2
-        sources:
-          - ingress
-          - service
-        policy: sync
-        txtOwnerId: "plane-app-eks"
-        serviceAccount:
-          annotations:
-            eks.amazonaws.com/role-arn: "arn:aws:iam::207137402976:role/plane-app-eks-prod-external-dns"
-        resources:
-          requests:
-            cpu: 25m
-            memory: 32Mi
-          limits:
-            cpu: 100m
-            memory: 64Mi
+  sources:
+    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+      chart: external-dns
+      targetRevision: 1.14.5
+      helm:
+        valueFiles:
+          - $values/kubernetes/argocd/values/external-dns.yaml
+    - repoURL: https://github.com/Mik3asg/taskboard-app-eks
+      targetRevision: HEAD
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: external-dns

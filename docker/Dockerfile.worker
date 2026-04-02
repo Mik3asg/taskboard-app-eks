@@ -1,3 +1,0 @@
-# Extends the official Plane worker image (Celery).
-# Add any custom task definitions or configuration here.
-FROM makeplane/plane-worker:stable

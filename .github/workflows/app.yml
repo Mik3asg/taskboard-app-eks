@@ -5,8 +5,7 @@ on:
     branches: [main]
     paths:
       - "app/**"
-      - "docker/**"
-      - "kubernetes/app/**"
+      - "kubernetes/**"
       - ".github/workflows/app.yml"
   workflow_dispatch: # allows manual trigger from GitHub Actions UI
 
@@ -40,16 +39,16 @@ jobs:
 
       # Multi-stage build — context is repo root so Dockerfile can reach app/
       - name: Build frontend image
-        run: docker build -f "${{ github.workspace }}/docker/Dockerfile.frontend" -t "${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }}" -t "${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:latest" "${{ github.workspace }}"
+        run: docker build -f "${{ github.workspace }}/app/frontend/Dockerfile" -t "${{ env.ECR_REGISTRY }}/taskboard-app-eks/frontend:${{ env.IMAGE_TAG }}" -t "${{ env.ECR_REGISTRY }}/taskboard-app-eks/frontend:latest" "${{ github.workspace }}"
 
       - name: Build backend image
-        run: docker build -f "${{ github.workspace }}/docker/Dockerfile.backend" -t "${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }}" -t "${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:latest" "${{ github.workspace }}"
+        run: docker build -f "${{ github.workspace }}/app/backend/Dockerfile" -t "${{ env.ECR_REGISTRY }}/taskboard-app-eks/backend:${{ env.IMAGE_TAG }}" -t "${{ env.ECR_REGISTRY }}/taskboard-app-eks/backend:latest" "${{ github.workspace }}"
 
       # Trivy scans images for CVEs before they reach ECR
       - name: Trivy scan — frontend
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.ECR_REGISTRY }}/taskboard-app-eks/frontend:${{ env.IMAGE_TAG }}
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH
@@ -58,7 +57,7 @@ jobs:
       - name: Trivy scan — backend
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.ECR_REGISTRY }}/taskboard-app-eks/backend:${{ env.IMAGE_TAG }}
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH
@@ -66,10 +65,10 @@ jobs:
 
       - name: Push images to ECR
         run: |
-          docker push ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:${{ env.IMAGE_TAG }}
-          docker push ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-frontend:latest
-          docker push ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:${{ env.IMAGE_TAG }}
-          docker push ${{ env.ECR_REGISTRY }}/plane-app-eks/plane-backend:latest
+          docker push ${{ env.ECR_REGISTRY }}/taskboard-app-eks/frontend:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REGISTRY }}/taskboard-app-eks/frontend:latest
+          docker push ${{ env.ECR_REGISTRY }}/taskboard-app-eks/backend:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REGISTRY }}/taskboard-app-eks/backend:latest
 
   # ── Deploy: update manifests + trigger ArgoCD sync ─────────────────────────
   deploy:
@@ -89,20 +88,21 @@ jobs:
           role-to-assume: ${{ secrets.AWS_CICD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Stamp the new ECR image tag into the K8s manifests so ArgoCD sees a diff
-      - name: Update image tags in manifests
+      # Stamp the new ECR image tag into the Helm values so ArgoCD sees a diff
+      - name: Update image tags in Helm values
         run: |
-          sed -i "s|plane-app-eks/plane-frontend:[^ ]*|plane-app-eks/plane-frontend:$IMAGE_TAG|g" \
-            kubernetes/app/plane-web.yaml
-          sed -i "s|plane-app-eks/plane-backend:[^ ]*|plane-app-eks/plane-backend:$IMAGE_TAG|g" \
-            kubernetes/app/plane-api.yaml kubernetes/app/plane-worker.yaml
+          sed -i "s|frontendTag:.*|frontendTag: \"$IMAGE_TAG\"|" \
+            kubernetes/taskboard/values.yaml
+          sed -i "s|backendTag:.*|backendTag: \"$IMAGE_TAG\"|" \
+            kubernetes/taskboard/values.yaml
 
-      - name: Commit updated manifests
+      - name: Commit updated Helm values
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add kubernetes/app/plane-web.yaml kubernetes/app/plane-api.yaml kubernetes/app/plane-worker.yaml
+          git add kubernetes/taskboard/values.yaml
           git commit -m "ci: update image tags to $IMAGE_TAG [skip ci]"
+          git pull --rebase origin main
           git push
 
       - name: Install ArgoCD CLI

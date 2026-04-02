@@ -8,9 +8,12 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Mik3asg/plane-app-aws-eks
+    repoURL: https://github.com/Mik3asg/taskboard-app-eks
     targetRevision: HEAD
-    path: kubernetes/app
+    path: kubernetes/taskboard
+    helm:
+      valueFiles:
+        - values.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: taskboard
