@@ -22,6 +22,7 @@ Production-grade DevOps project: deploy a secure cloud-native task manager (**Ta
 11. [Troubleshooting](#11-troubleshooting)
 12. [Challenges and fixes](#12-challenges-and-fixes)
 13. [Cost estimate](#13-cost-estimate)
+14. [Teardown](#14-teardown)
 
 ---
 
@@ -567,9 +568,104 @@ aws eks update-nodegroup-config \
 | Route53 hosted zone | ~$0.50 |
 | **Total** | **~$170/month** |
 
-Scale to 1 node when not in use (~$110/month). Destroy everything when done:
+Scale to 1 node when not in use (~$110/month).
+
+---
+
+## 14. Teardown
+
+Follow this order. Reversing it will cause dependency errors (e.g. Terraform cannot delete the VPC if the ELB still exists).
+
+### Step 1 — Delete ArgoCD Applications
+
+This tells ArgoCD to delete all the Kubernetes resources it manages (ingress-nginx, cert-manager, external-dns, monitoring, taskboard) before the cluster is destroyed.
 
 ```bash
-cd terraform/infrastructure && terraform destroy
-cd terraform/bootstrap     && terraform destroy
+kubectl delete -f kubernetes/argocd/apps/
 ```
+
+Wait until all namespaces are gone:
+
+```bash
+kubectl get ns
+```
+
+### Step 2 — Delete any remaining Load Balancers
+
+ArgoCD pruning should remove the NLB, but verify — a leftover ELB will block VPC deletion:
+
+```bash
+aws elb describe-load-balancers --region eu-west-2 --query 'LoadBalancerDescriptions[*].LoadBalancerName'
+aws elbv2 describe-load-balancers --region eu-west-2 --query 'LoadBalancers[*].LoadBalancerArn'
+```
+
+If any remain, delete them manually before proceeding.
+
+### Step 3 — Delete Route53 records (except NS and SOA)
+
+ExternalDNS creates A and TXT records in the hosted zone. Terraform cannot delete the hosted zone while records exist. Go to the Route53 console and delete all records except the default `NS` and `SOA` entries.
+
+Or via CLI:
+
+```bash
+# List non-NS/SOA records
+aws route53 list-resource-record-sets \
+  --hosted-zone-id <zone-id> \
+  --query "ResourceRecordSets[?Type != 'NS' && Type != 'SOA']"
+```
+
+### Step 4 — Force-delete ECR repositories
+
+ECR repos with images cannot be deleted by Terraform unless `force_delete = true` is set. If Terraform fails on ECR:
+
+```bash
+aws ecr delete-repository \
+  --repository-name taskboard-app-eks/frontend \
+  --force --region eu-west-2
+
+aws ecr delete-repository \
+  --repository-name taskboard-app-eks/backend \
+  --force --region eu-west-2
+```
+
+### Step 5 — Destroy infrastructure
+
+```bash
+cd terraform/infrastructure
+terraform destroy
+```
+
+If Terraform gets stuck on the VPC (security group or subnet dependency), check for leftover security groups:
+
+```bash
+aws ec2 describe-security-groups \
+  --filters "Name=vpc-id,Values=<vpc-id>" \
+  --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
+  --region eu-west-2
+
+# Delete if found
+aws ec2 delete-security-group --group-id <sg-id> --region eu-west-2
+```
+
+Then re-run `terraform destroy`.
+
+### Step 6 — Destroy bootstrap (S3 state bucket)
+
+The S3 bucket has `prevent_destroy = true` and versioning enabled. You must first delete all object versions, then destroy:
+
+```bash
+# Delete all versions and delete markers
+aws s3api delete-objects \
+  --bucket taskboard-app-eks-terraform-state \
+  --delete "$(aws s3api list-object-versions \
+    --bucket taskboard-app-eks-terraform-state \
+    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+    --output json)"
+
+cd terraform/bootstrap
+terraform destroy
+```
+
+### Step 7 — Remove NS records from your registrar
+
+Once the Route53 hosted zone is deleted, remove the NS delegation records from Cloudflare (or your registrar) for `labs.virtualscale.dev`.
