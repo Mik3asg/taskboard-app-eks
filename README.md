@@ -1,6 +1,6 @@
 # taskboard-app-eks
 
-Deploys **TaskBoard** — a simple React/Node.js task manager — on Amazon EKS using Terraform, ArgoCD GitOps, GitHub Actions CI/CD, Helm, and Prometheus/Grafana monitoring.
+Production-grade DevOps project: deploy a secure cloud-native task manager (TaskBoard) on Amazon EKS using Terraform IaC, ArgoCD GitOps, GitHub Actions CI/CD, Helm, cert-manager TLS, ExternalDNS, and Prometheus + Grafana monitoring.
 
 **Live:** https://eks.labs.virtualscale.dev | **Region:** eu-west-2 | **EKS:** 1.32
 
@@ -8,20 +8,32 @@ Deploys **TaskBoard** — a simple React/Node.js task manager — on Amazon EKS 
 
 ## Table of contents
 
-1. [Stack](#1-stack)
-2. [Key components](#2-key-components)
-3. [Architecture](#3-architecture)
-4. [Repository structure](#4-repository-structure)
-5. [Prerequisites](#5-prerequisites)
-6. [Deployment](#6-deployment)
-7. [Manual vs automated](#7-manual-vs-automated)
-8. [Application](#8-application)
-9. [CI/CD pipelines](#9-cicd-pipelines)
-10. [Monitoring](#10-monitoring)
-11. [Troubleshooting](#11-troubleshooting)
-12. [Challenges and fixes](#12-challenges-and-fixes)
-13. [Cost](#13-cost)
-14. [Teardown](#14-teardown)
+- [taskboard-app-eks](#taskboard-app-eks)
+  - [Table of contents](#table-of-contents)
+  - [1. Stack](#1-stack)
+  - [2. Key components](#2-key-components)
+  - [3. Architecture](#3-architecture)
+  - [4. Repository structure](#4-repository-structure)
+  - [5. Prerequisites](#5-prerequisites)
+  - [6. Deployment](#6-deployment)
+    - [1 — Bootstrap](#1--bootstrap)
+    - [2 — Infrastructure](#2--infrastructure)
+    - [3 — Delegate DNS](#3--delegate-dns)
+    - [4 — Connect kubectl](#4--connect-kubectl)
+    - [5 — Install ArgoCD](#5--install-argocd)
+    - [6 — Deploy everything via ArgoCD](#6--deploy-everything-via-argocd)
+    - [7 — Apply ClusterIssuer (once cert-manager pods are Running)](#7--apply-clusterissuer-once-cert-manager-pods-are-running)
+    - [8 — Apply Grafana secret](#8--apply-grafana-secret)
+    - [9 — GitHub Actions secrets](#9--github-actions-secrets)
+    - [10 — Push and verify](#10--push-and-verify)
+  - [7. Manual vs automated](#7-manual-vs-automated)
+  - [8. Application](#8-application)
+  - [9. CI/CD pipelines](#9-cicd-pipelines)
+  - [10. Monitoring](#10-monitoring)
+  - [11. Troubleshooting](#11-troubleshooting)
+  - [12. Challenges and fixes](#12-challenges-and-fixes)
+  - [13. Cost](#13-cost)
+  - [14. Teardown](#14-teardown)
 
 ---
 
