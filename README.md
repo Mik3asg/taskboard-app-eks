@@ -33,7 +33,7 @@ A custom-built task manager app (**TaskBoard**) deployed on Amazon EKS following
   - [8. Application](#8-application)
   - [9. CI/CD pipelines](#9-cicd-pipelines)
   - [10. Monitoring](#10-monitoring)
-  - [11. Troubleshooting](#11-troubleshooting)
+  - [11. Useful commands](#11-useful-commands)
   - [12. Challenges and fixes](#12-challenges-and-fixes)
   - [13. Cost](#13-cost)
   - [14. Teardown](#14-teardown)
@@ -44,8 +44,10 @@ A custom-built task manager app (**TaskBoard**) deployed on Amazon EKS following
 
 **Prerequisites:**
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- [Node.js](https://nodejs.org/) >= 18 (only needed the first time to generate lock files)
+- [Node.js](https://nodejs.org/) >= 18 (first time only)
 - Git
+
+Run all commands from the **repo root** (`taskboard-app-eks/`).
 
 ```bash
 # First time only - generate lock files
@@ -56,10 +58,24 @@ cd app/backend  && npm install && cd ../..
 docker compose up --build
 ```
 
-Open http://localhost:3000. API at http://localhost:8000/api/tasks.
+Services started:
 
+| Service | URL |
+|---|---|
+| Frontend (React) | http://localhost:3001 |
+| Backend API | http://localhost:8000/api/tasks |
+| PostgreSQL | localhost:5432 |
+| Redis | localhost:6379 |
+
+**Useful local commands:**
 ```bash
-docker compose down   # stop
+docker compose ps                        # check container status
+docker compose logs backend              # backend logs
+docker compose logs frontend             # frontend/nginx logs
+docker compose logs postgres             # database logs
+docker compose restart backend           # restart a single service
+docker compose down                      # stop and remove containers
+docker compose down --volumes            # stop and wipe database
 ```
 
 ---
@@ -82,21 +98,38 @@ docker compose down   # stop
 
 ## 2. Key components
 
-**NGINX Ingress Controller** - receives traffic from the NLB, routes `/` to frontend and `/api` to backend, terminates TLS.
+### AWS Infrastructure (Terraform)
+EKS cluster, VPC, IAM roles, ECR, and Route53 hosted zone provisioned via reusable Terraform modules (`vpc`, `eks`, `irsa`). State stored in S3 with native locking. Networking uses private subnets for EKS nodes and public subnets for the NLB. IAM roles are scoped per service account via IRSA — nodes never share a broad role.
 
-**cert-manager** - requests and renews Let's Encrypt certificates automatically via DNS-01 challenge against Route53.
+### NGINX Ingress Controller
+Deployed via Helm (ArgoCD). Provisions an AWS NLB, receives all inbound HTTPS traffic, and routes requests to services based on path (`/` → frontend, `/api` → backend). Terminates TLS using the certificate managed by cert-manager.
 
-**ExternalDNS** - watches Ingress resources and creates/updates Route53 A records automatically. No manual DNS changes needed after the initial NS delegation.
+### cert-manager (SSL/TLS)
+Installed via ArgoCD. Watches Ingress resources annotated with `letsencrypt-prod` ClusterIssuer, requests certificates from Let's Encrypt using DNS-01 challenge (creates a TXT record in Route53 to prove domain ownership), and renews them automatically before expiry.
 
-**ArgoCD** - syncs cluster state from this Git repo on every push. Git is the source of truth.
+### ExternalDNS (Dynamic DNS)
+Deployed via ArgoCD. Watches Kubernetes Ingress and Service resources — when an Ingress hostname is created or updated, ExternalDNS automatically creates or updates the corresponding A record in Route53. No manual DNS changes needed after the initial NS delegation.
 
-**Helm** - templates the TaskBoard app. CI stamps new image SHAs into `values.yaml`; ArgoCD detects the diff and redeploys.
+### ArgoCD (GitOps)
+Runs inside the cluster. Continuously reconciles cluster state against this Git repo. When any manifest or Helm values file changes on `main`, ArgoCD detects the diff and applies it automatically. Git is the single source of truth — no manual `kubectl apply` for app changes.
 
-**Checkov** - scans Terraform for security misconfigurations in CI. Intentional skips documented in `.checkov.yaml` per module.
+### Helm
+Used to package and deploy the TaskBoard app (`kubernetes/taskboard/`). Templates separate configuration (image tags, resource limits, hostnames) from Kubernetes manifests. The CI pipeline stamps the new image SHA into `values.yaml` on each build; ArgoCD picks up the diff and redeploys.
 
-**Trivy** - scans Docker images for CVEs before they reach ECR. Fails the pipeline on CRITICAL/HIGH.
+### CI/CD Pipelines (GitHub Actions)
+Three pipelines: bootstrap (fmt + validate + Checkov), infrastructure (validate + Checkov + plan + apply), and app (Docker build + Trivy scan + ECR push + ArgoCD sync). All AWS authentication uses GitHub OIDC — no long-lived credentials stored.
 
-**IRSA** - gives cert-manager and ExternalDNS their own scoped IAM roles instead of sharing the node role.
+### Checkov
+Scans Terraform code for security misconfigurations before infrastructure is provisioned. Runs in the Terraform CI pipeline. Intentional skips are documented with justifications in `.checkov.yaml` per module.
+
+### Trivy
+Scans Docker images for CVEs before they are pushed to ECR. Fails the pipeline on CRITICAL or HIGH severity vulnerabilities.
+
+### Monitoring (Prometheus + Grafana)
+kube-prometheus-stack deployed via ArgoCD. Prometheus scrapes metrics from all cluster workloads and nodes. Grafana pre-loaded with dashboards for node CPU/memory, pod health, and NGINX Ingress traffic. Prometheus data retained for 7 days on a 5Gi EBS volume.
+
+### IRSA (IAM Roles for Service Accounts)
+Each service account (cert-manager, ExternalDNS) gets its own scoped IAM role instead of sharing the broad node role. Implemented via a reusable `terraform/modules/irsa/` module using EKS OIDC federation.
 
 ---
 
@@ -364,31 +397,56 @@ Pre-loaded dashboards:
 
 ---
 
-## 11. Troubleshooting
+## 11. Useful commands
 
+**Cluster health**
 ```bash
-# Cluster
-kubectl get nodes && kubectl get pods -A
+kubectl get nodes -o wide                          # node status, IPs, instance type
+kubectl get pods -A                                # all pods across all namespaces
+kubectl top nodes                                  # CPU/memory per node
+kubectl top pods -n taskboard                      # CPU/memory per app pod
+```
 
-# ArgoCD
-kubectl get applications -n argocd
-kubectl describe application <name> -n argocd | tail -30
-
-# Force ArgoCD resync
-kubectl patch application taskboard -n argocd --type merge -p '{"operation": null}'
-kubectl annotate application taskboard -n argocd argocd.argoproj.io/refresh=hard --overwrite
-
-# TLS
-kubectl get certificate -n taskboard
-kubectl logs -n cert-manager deployment/cert-manager --tail=30
-
-# DNS
-kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=30
-
-# App
+**App**
+```bash
+kubectl get pods -n taskboard                      # app pod status
 kubectl logs -n taskboard -l app=backend --tail=30
+kubectl logs -n taskboard -l app=frontend --tail=30
+kubectl exec -it -n taskboard <pod> -- sh          # shell into a running pod
+kubectl get ingress -n taskboard                   # ingress hostname + address
+curl -I https://eks.labs.virtualscale.dev          # end-to-end HTTPS check
+```
 
-# Scale nodes
+**ArgoCD**
+```bash
+kubectl get applications -n argocd                 # sync status of all apps
+kubectl describe application <name> -n argocd | tail -30
+# Force resync if stuck
+kubectl annotate application taskboard -n argocd argocd.argoproj.io/refresh=hard --overwrite
+```
+
+**TLS / cert-manager**
+```bash
+kubectl get certificate -n taskboard               # READY = True means cert is valid
+kubectl describe certificate taskboard-tls -n taskboard
+kubectl logs -n cert-manager deployment/cert-manager --tail=30
+```
+
+**DNS / ExternalDNS**
+```bash
+kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=30
+dig eks.labs.virtualscale.dev                      # verify DNS resolves
+```
+
+**Monitoring**
+```bash
+kubectl get pods -n monitoring                     # prometheus + grafana status
+kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
+# then open http://127.0.0.1:3000
+```
+
+**Scale nodes**
+```bash
 aws eks update-nodegroup-config \
   --cluster-name taskboard-app-eks-prod \
   --nodegroup-name taskboard-app-eks-prod-nodes \
